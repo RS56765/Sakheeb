@@ -61,10 +61,10 @@ jobs:
               mega-get /RDP_Full_Backup "C:\RestoreTemp"
               
               Write-Host "Restoring User Files and AppData..."
-              robocopy "C:\RestoreTemp\RDP_Full_Backup\Desktop" "C:\Users\RDPUser\Desktop" /E /NJH /NJS /nc /ns /np /NDL /XF desktop.ini
-              robocopy "C:\RestoreTemp\RDP_Full_Backup\Documents" "C:\Users\RDPUser\Documents" /E /NJH /NJS /nc /ns /np /NDL /XF desktop.ini
-              robocopy "C:\RestoreTemp\RDP_Full_Backup\Downloads" "C:\Users\RDPUser\Downloads" /E /NJH /NJS /nc /ns /np /NDL /XF desktop.ini
-              robocopy "C:\RestoreTemp\RDP_Full_Backup\AppData" "C:\Users\RDPUser\AppData" /E /NJH /NJS /nc /ns /np /NDL /XF desktop.ini
+              robocopy "C:\RestoreTemp\RDP_Full_Backup\Desktop" "C:\Users\RDPUser\Desktop" /E /NJH /NJS /nc /ns /np /NDL /XF desktop.ini | Out-Null
+              robocopy "C:\RestoreTemp\RDP_Full_Backup\Documents" "C:\Users\RDPUser\Documents" /E /NJH /NJS /nc /ns /np /NDL /XF desktop.ini | Out-Null
+              robocopy "C:\RestoreTemp\RDP_Full_Backup\Downloads" "C:\Users\RDPUser\Downloads" /E /NJH /NJS /nc /ns /np /NDL /XF desktop.ini | Out-Null
+              robocopy "C:\RestoreTemp\RDP_Full_Backup\AppData" "C:\Users\RDPUser\AppData" /E /NJH /NJS /nc /ns /np /NDL /XF desktop.ini | Out-Null
               
               Remove-Item "C:\RestoreTemp" -Recurse -Force -ErrorAction SilentlyContinue
               Write-Host "Data restored successfully!"
@@ -124,11 +124,13 @@ jobs:
               mega-login $env:MEGA_EMAIL $env:MEGA_PASSWORD
               Write-Host "Preparing robust profile backup..."
               
-              # Robust copy using Robocopy to bypass locked AppData files
-              robocopy "C:\Users\RDPUser\Desktop" "C:\BackupTemp\Desktop" /E /ZB /R:1 /W:1 /NJH /NJS /nc /ns /np /NDL
-              robocopy "C:\Users\RDPUser\Documents" "C:\BackupTemp\Documents" /E /ZB /R:1 /W:1 /NJH /NJS /nc /ns /np /NDL
-              robocopy "C:\Users\RDPUser\Downloads" "C:\BackupTemp\Downloads" /E /ZB /R:1 /W:1 /NJH /NJS /nc /ns /np /NDL
-              robocopy "C:\Users\RDPUser\AppData" "C:\BackupTemp\AppData" /E /ZB /R:1 /W:1 /NJH /NJS /nc /ns /np /NDL
+              Remove-Item "C:\BackupTemp" -Recurse -Force -ErrorAction SilentlyContinue
+              New-Item -ItemType Directory -Path "C:\BackupTemp" -Force
+              
+              robocopy "C:\Users\RDPUser\Desktop" "C:\BackupTemp\Desktop" /E /ZB /R:1 /W:1 /NJH /NJS /nc /ns /np /NDL | Out-Null
+              robocopy "C:\Users\RDPUser\Documents" "C:\BackupTemp\Documents" /E /ZB /R:1 /W:1 /NJH /NJS /nc /ns /np /NDL | Out-Null
+              robocopy "C:\Users\RDPUser\Downloads" "C:\BackupTemp\Downloads" /E /ZB /R:1 /W:1 /NJH /NJS /nc /ns /np /NDL | Out-Null
+              robocopy "C:\Users\RDPUser\AppData" "C:\BackupTemp\AppData" /E /ZB /R:1 /W:1 /NJH /NJS /nc /ns /np /NDL | Out-Null
               
               Write-Host "Uploading data to MEGA cloud storage..."
               mega-put -c "C:\BackupTemp" /RDP_Full_Backup
@@ -136,4 +138,3 @@ jobs:
           } catch {
               Write-Host "Backup execution failed."
           }
-        
