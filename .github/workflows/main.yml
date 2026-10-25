@@ -1,4 +1,4 @@
-name: RDP AppData Debug & Sync
+name: RDP AppData Exact Path Fix
 
 on:
   workflow_dispatch:
@@ -41,7 +41,7 @@ jobs:
           
           echo "RDP_PASS=$password" >> $env:GITHUB_ENV
 
-      - name: Install MEGAcmd & Restore Full AppData
+      - name: Install MEGAcmd & Restore AppData
         env:
           MEGA_EMAIL: ${{ secrets.MEGA_EMAIL }}
           MEGA_PASSWORD: ${{ secrets.MEGA_PASSWORD }}
@@ -51,31 +51,35 @@ jobs:
           $env:Path += ";$env:LOCALAPPDATA\MEGAcmd"
 
           Write-Host "========================================"
-          Write-Host "    MEGA CLOUD STATUS INDICATOR         "
+          Write-Host "    MEGA RESTORE EXACT PATH CHECK       "
           Write-Host "========================================"
           mega-login $env:MEGA_EMAIL $env:MEGA_PASSWORD
           
-          $checkBackup = mega-ls / 2>&1
-          if ($checkBackup -like "*RDP_Chrome_Backup*") {
-              Write-Host "[INFO] Status: Backup Found on MEGA! (Restoring Data...)" -ForegroundColor Green
-              New-Item -ItemType Directory -Path "C:\RestoreTemp" -Force
-              mega-get /RDP_Chrome_Backup "C:\RestoreTemp"
-              
+          Remove-Item "C:\RestoreTemp" -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path "C:\RestoreTemp" -Force
+
+          # Download backup from MEGA
+          mega-get /RDP_Chrome_Backup "C:\RestoreTemp" 2>&1
+          
+          # Exact path detection
+          $sourcePath = $null
+          if (Test-Path "C:\RestoreTemp\RDP_Chrome_Backup\ChromeData") {
+              $sourcePath = "C:\RestoreTemp\RDP_Chrome_Backup\ChromeData"
+          } elseif (Test-Path "C:\RestoreTemp\ChromeData") {
+              $sourcePath = "C:\RestoreTemp\ChromeData"
+          }
+
+          if ($sourcePath) {
+              Write-Host "[INFO] Status: Backup Found! Injecting data into C:\Users\RDPUser\AppData..." -ForegroundColor Green
               New-Item -ItemType Directory -Path "C:\Users\RDPUser\AppData" -Force
               
-              if (Test-Path "C:\RestoreTemp\RDP_Chrome_Backup\AppData") {
-                  robocopy "C:\RestoreTemp\RDP_Chrome_Backup\AppData" "C:\Users\RDPUser\AppData" /E /ZB
-              } elseif (Test-Path "C:\RestoreTemp\AppData") {
-                  robocopy "C:\RestoreTemp\AppData" "C:\Users\RDPUser\AppData" /E /ZB
-              } else {
-                  robocopy "C:\RestoreTemp" "C:\Users\RDPUser\AppData" /E /ZB
-              }
-              
-              Remove-Item "C:\RestoreTemp" -Recurse -Force -ErrorAction SilentlyContinue
-              Write-Host "[INFO] Status: Data Successfully Inserted into Windows!" -ForegroundColor Green
+              robocopy "$sourcePath" "C:\Users\RDPUser\AppData" /E /ZB /NJH /NJS /nc /ns /np
+              Write-Host "[INFO] Status: Data Successfully Injected into Windows!" -ForegroundColor Green
           } else {
-              Write-Host "[WARNING] Status: No Backup Found on MEGA. Starting Fresh." -ForegroundColor Yellow
+              Write-Host "[WARNING] Status: Backup files not found in extracted folder. Starting fresh." -ForegroundColor Yellow
           }
+          
+          Remove-Item "C:\RestoreTemp" -Recurse -Force -ErrorAction SilentlyContinue
           Write-Host "========================================"
           exit 0
 
@@ -116,7 +120,7 @@ jobs:
           
           while ($true) { Start-Sleep -Seconds 300 }
 
-      - name: Backup Full AppData to MEGA on Exit
+      - name: Backup AppData to MEGA on Exit
         if: always()
         env:
           MEGA_EMAIL: ${{ secrets.MEGA_EMAIL }}
@@ -130,14 +134,16 @@ jobs:
           
           Write-Host "Preparing backup folder..."
           Remove-Item "C:\BackupTemp" -Recurse -Force -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Path "C:\BackupTemp\AppData" -Force
+          New-Item -ItemType Directory -Path "C:\BackupTemp\ChromeData" -Force
           
           $appDataPath = "C:\Users\RDPUser\AppData"
           if (Test-Path $appDataPath) {
               Write-Host "Copying AppData files..."
-              robocopy "$appDataPath" "C:\BackupTemp\AppData" /E /ZB /R:1 /W:1 /XD "Cache" "Code Cache" "GPUCache"
+              robocopy "$appDataPath" "C:\BackupTemp\ChromeData" /E /ZB /R:1 /W:1 /XD "Cache" "Code Cache" "GPUCache" /NJH /NJS /nc /ns /np
           }
           
           Write-Host "Uploading to MEGA cloud..."
-          mega-put -c "C:\BackupTemp" /RDP_Chrome_Backup
+          mega-rm -r /RDP_Chrome_Backup 2>&1 | Out-Null
+          mega-put "C:\BackupTemp\ChromeData" /RDP_Chrome_Backup
+          
           Write-Host "Backup completed successfully!"
