@@ -50,38 +50,33 @@ jobs:
           $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
           $env:Path += ";$env:LOCALAPPDATA\MEGAcmd"
 
-          Write-Host "Logging into MEGA for restore..."
+          Write-Host "========================================"
+          Write-Host "    MEGA CLOUD STATUS INDICATOR         "
+          Write-Host "========================================"
           mega-login $env:MEGA_EMAIL $env:MEGA_PASSWORD
           
-          Write-Host "Checking MEGA root directory..."
-          mega-ls
-          
           $checkBackup = mega-ls / 2>&1
-          if ($checkBackup -like "*RDP_FullAppData_Backup*") {
-              Write-Host "Backup found on MEGA! Downloading..."
+          if ($checkBackup -like "*RDP_Chrome_Backup*") {
+              Write-Host "[INFO] Status: Backup Found on MEGA! (Restoring Data...)" -ForegroundColor Green
               New-Item -ItemType Directory -Path "C:\RestoreTemp" -Force
-              mega-get /RDP_FullAppData_Backup "C:\RestoreTemp"
+              mega-get /RDP_Chrome_Backup "C:\RestoreTemp"
               
-              Write-Host "Contents of downloaded backup:"
-              Get-ChildItem "C:\RestoreTemp" -Recurse
-              
-              Write-Host "Restoring AppData to C:\Users\RDPUser\AppData..."
               New-Item -ItemType Directory -Path "C:\Users\RDPUser\AppData" -Force
               
-              if (Test-Path "C:\RestoreTemp\RDP_FullAppData_Backup\AppData") {
-                  robocopy "C:\RestoreTemp\RDP_FullAppData_Backup\AppData" "C:\Users\RDPUser\AppData" /E /ZB
+              if (Test-Path "C:\RestoreTemp\RDP_Chrome_Backup\AppData") {
+                  robocopy "C:\RestoreTemp\RDP_Chrome_Backup\AppData" "C:\Users\RDPUser\AppData" /E /ZB
               } elseif (Test-Path "C:\RestoreTemp\AppData") {
                   robocopy "C:\RestoreTemp\AppData" "C:\Users\RDPUser\AppData" /E /ZB
               } else {
-                  Write-Host "Backup structure path mismatch, copying all extracted files..."
                   robocopy "C:\RestoreTemp" "C:\Users\RDPUser\AppData" /E /ZB
               }
               
               Remove-Item "C:\RestoreTemp" -Recurse -Force -ErrorAction SilentlyContinue
-              Write-Host "Restore process completed!"
+              Write-Host "[INFO] Status: Data Successfully Inserted into Windows!" -ForegroundColor Green
           } else {
-              Write-Host "No prior backup found on MEGA. Starting fresh."
+              Write-Host "[WARNING] Status: No Backup Found on MEGA. Starting Fresh." -ForegroundColor Yellow
           }
+          Write-Host "========================================"
           exit 0
 
       - name: Install Tailscale
@@ -144,5 +139,5 @@ jobs:
           }
           
           Write-Host "Uploading to MEGA cloud..."
-          mega-put "C:\BackupTemp" /RDP_FullAppData_Backup
+          mega-put -c "C:\BackupTemp" /RDP_Chrome_Backup
           Write-Host "Backup completed successfully!"
