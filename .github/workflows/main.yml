@@ -57,14 +57,13 @@ jobs:
           mega-login $env:MEGA_EMAIL $env:MEGA_PASSWORD
           
           Write-Host "Restoring your data from MEGA..."
-          $list = mega-ls /RDP_Full_Backup 2>&1
-          if ($LASTEXITCODE -eq 0) {
+          $checkBackup = mega-ls / 2>&1
+          if ($checkBackup -like "*RDP_Full_Backup*") {
               mega-get /RDP_Full_Backup "C:\Users\RDPUser"
               Write-Host "Data restored successfully to user profile!"
           } else {
-              Write-Host "No prior backup found or restore skipped. Starting fresh."
+              Write-Host "No prior backup found. Starting fresh profile."
           }
-        continue-on-error: true
 
       - name: Install Tailscale
         run: |
