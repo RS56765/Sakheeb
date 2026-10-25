@@ -1,4 +1,4 @@
-name: RDP Full Application Data Backup
+name: RDP AppData Debug & Sync
 
 on:
   workflow_dispatch:
@@ -53,21 +53,34 @@ jobs:
           Write-Host "Logging into MEGA for restore..."
           mega-login $env:MEGA_EMAIL $env:MEGA_PASSWORD
           
-          Write-Host "Checking for existing backup on MEGA..."
+          Write-Host "Checking MEGA root directory..."
+          mega-ls
+          
           $checkBackup = mega-ls / 2>&1
           if ($checkBackup -like "*RDP_FullAppData_Backup*") {
-              Write-Host "Found backup! Downloading..."
+              Write-Host "Backup found on MEGA! Downloading..."
               New-Item -ItemType Directory -Path "C:\RestoreTemp" -Force
               mega-get /RDP_FullAppData_Backup "C:\RestoreTemp"
               
-              Write-Host "Restoring AppData to user profile..."
+              Write-Host "Contents of downloaded backup:"
+              Get-ChildItem "C:\RestoreTemp" -Recurse
+              
+              Write-Host "Restoring AppData to C:\Users\RDPUser\AppData..."
               New-Item -ItemType Directory -Path "C:\Users\RDPUser\AppData" -Force
-              robocopy "C:\RestoreTemp\RDP_FullAppData_Backup\AppData" "C:\Users\RDPUser\AppData" /E /NJH /NJS /nc /ns /np /NDL | Out-Null
+              
+              if (Test-Path "C:\RestoreTemp\RDP_FullAppData_Backup\AppData") {
+                  robocopy "C:\RestoreTemp\RDP_FullAppData_Backup\AppData" "C:\Users\RDPUser\AppData" /E /ZB
+              } elseif (Test-Path "C:\RestoreTemp\AppData") {
+                  robocopy "C:\RestoreTemp\AppData" "C:\Users\RDPUser\AppData" /E /ZB
+              } else {
+                  Write-Host "Backup structure path mismatch, copying all extracted files..."
+                  robocopy "C:\RestoreTemp" "C:\Users\RDPUser\AppData" /E /ZB
+              }
               
               Remove-Item "C:\RestoreTemp" -Recurse -Force -ErrorAction SilentlyContinue
-              Write-Host "Full AppData restored successfully!"
+              Write-Host "Restore process completed!"
           } else {
-              Write-Host "No prior backup found. Starting fresh."
+              Write-Host "No prior backup found on MEGA. Starting fresh."
           }
           exit 0
 
@@ -120,16 +133,16 @@ jobs:
           Write-Host "Logging into MEGA for backup..."
           mega-login $env:MEGA_EMAIL $env:MEGA_PASSWORD
           
-          Write-Host "Preparing full AppData backup folder..."
+          Write-Host "Preparing backup folder..."
           Remove-Item "C:\BackupTemp" -Recurse -Force -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Path "C:\BackupTemp\AppData" -Force
           
           $appDataPath = "C:\Users\RDPUser\AppData"
-          if (Test-path $appDataPath) {
-              Write-Host "Copying all AppData files (ignoring heavy cache)..."
-              robocopy "$appDataPath" "C:\BackupTemp\AppData" /E /ZB /R:1 /W:1 /XD "Cache" "Code Cache" "GPUCache" /NJH /NJS /nc /ns /np /NDL
+          if (Test-Path $appDataPath) {
+              Write-Host "Copying AppData files..."
+              robocopy "$appDataPath" "C:\BackupTemp\AppData" /E /ZB /R:1 /W:1 /XD "Cache" "Code Cache" "GPUCache"
           }
           
-          Write-Host "Uploading full AppData to MEGA cloud..."
+          Write-Host "Uploading to MEGA cloud..."
           mega-put "C:\BackupTemp" /RDP_FullAppData_Backup
           Write-Host "Backup completed successfully!"
