@@ -62,7 +62,7 @@ jobs:
               New-Item -ItemType Directory -Path "C:\RestoreTemp" -Force
               mega-get /RDP_Full_Backup "C:\RestoreTemp"
               
-              Write-Host "Restoring User Files and AppData..."
+              Write-Host "Restoring User Files, Downloads, and AppData..."
               if (Test-Path "C:\RestoreTemp\Desktop") { Copy-Item "C:\RestoreTemp\Desktop\*" "C:\Users\RDPUser\Desktop" -Recurse -Force -ErrorAction SilentlyContinue }
               if (Test-Path "C:\RestoreTemp\Documents") { Copy-Item "C:\RestoreTemp\Documents\*" "C:\Users\RDPUser\Documents" -Recurse -Force -ErrorAction SilentlyContinue }
               if (Test-Path "C:\RestoreTemp\Downloads") { Copy-Item "C:\RestoreTemp\Downloads\*" "C:\Users\RDPUser\Downloads" -Recurse -Force -ErrorAction SilentlyContinue }
