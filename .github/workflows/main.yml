@@ -42,6 +42,9 @@ jobs:
           echo "RDP_PASS=$password" >> $env:GITHUB_ENV
 
       - name: Install MEGAcmd & Restore User Profile
+        env:
+          MEGA_EMAIL: ${{ secrets.MEGA_EMAIL }}
+          MEGA_PASSWORD: ${{ secrets.MEGA_PASSWORD }}
         run: |
           Write-Host "Installing MEGAcmd via Chocolatey..."
           choco install megacmd -y
@@ -51,10 +54,7 @@ jobs:
           $env:Path += ";$megaPath"
 
           Write-Host "Logging into MEGA..."
-          $email = "${{ secrets.MEGA_EMAIL }}"
-          $pass = "${{ secrets.MEGA_PASSWORD }}"
-          
-          mega-login $email $pass
+          mega-login $env:MEGA_EMAIL $env:MEGA_PASSWORD
           
           Write-Host "Restoring your data from MEGA..."
           $list = mega-ls /RDP_Full_Backup 2>&1
@@ -115,14 +115,15 @@ jobs:
 
       - name: Backup User Profile to MEGA on Exit
         if: always()
+        env:
+          MEGA_EMAIL: ${{ secrets.MEGA_EMAIL }}
+          MEGA_PASSWORD: ${{ secrets.MEGA_PASSWORD }}
         run: |
           $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
           $megaPath = "$env:LOCALAPPDATA\MEGAcmd"
           $env:Path += ";$megaPath"
           try {
-              $email = "${{ secrets.MEGA_EMAIL }}"
-              $pass = "${{ secrets.MEGA_PASSWORD }}"
-              mega-login $email $pass
+              mega-login $env:MEGA_EMAIL $env:MEGA_PASSWORD
               Write-Host "Backing up entire user profile to MEGA..."
               mega-put -c "C:\Users\RDPUser" /RDP_Full_Backup
               Write-Host "Full Profile Backup completed successfully!"
