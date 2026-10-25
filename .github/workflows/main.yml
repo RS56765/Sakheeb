@@ -1,4 +1,4 @@
-name: RDP Fast Profile Backup
+name: RDP Auto Backup Timer
 
 on:
   workflow_dispatch:
@@ -50,24 +50,14 @@ jobs:
           $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
           $env:Path += ";$env:LOCALAPPDATA\MEGAcmd"
 
-          Write-Host "Logging into MEGA..."
           mega-login $env:MEGA_EMAIL $env:MEGA_PASSWORD
-          
-          Write-Host "Checking for existing backup on MEGA..."
           $checkBackup = mega-ls / 2>&1
           if ($checkBackup -like "*RDP_Chrome_Backup*") {
-              Write-Host "Prior backup found! Downloading..."
               New-Item -ItemType Directory -Path "C:\RestoreTemp" -Force
               mega-get /RDP_Chrome_Backup "C:\RestoreTemp"
-              
-              Write-Host "Restoring Chrome Logins & Data..."
               New-Item -ItemType Directory -Path "C:\Users\RDPUser\AppData\Local\Google\Chrome" -Force
               robocopy "C:\RestoreTemp\RDP_Chrome_Backup\ChromeData" "C:\Users\RDPUser\AppData\Local\Google\Chrome\User Data" /E /NJH /NJS /nc /ns /np /NDL | Out-Null
-              
               Remove-Item "C:\RestoreTemp" -Recurse -Force -ErrorAction SilentlyContinue
-              Write-Host "Chrome profile restored successfully!"
-          } else {
-              Write-Host "No prior backup found. Starting fresh."
           }
           if ($true) { exit 0 }
 
@@ -87,15 +77,12 @@ jobs:
           $retries = 0
           while (-not $tsIP -and $retries -lt 15) {
               $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
-              if (-not $tsIP) {
-                  Start-Sleep -Seconds 5
-                  $retries++
-              }
+              if (-not $tsIP) { Start-Sleep -Seconds 5; $retries++ }
           }
           if (-not $tsIP) { Write-Error "Tailscale IP not assigned."; exit 1 }
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
 
-      - name: Display Connection Details & Maintain
+      - name: Display Connection Details & Work
         env:
           RDP_PASS: ${{ env.RDP_PASS }}
           TAILSCALE_IP: ${{ env.TAILSCALE_IP }}
@@ -107,9 +94,10 @@ jobs:
           Write-Host " Username : RDPUser"
           Write-Host " Password : $env:RDP_PASS"
           Write-Host "========================================"
-          Write-Host "Keep this window open..."
+          Write-Host "Aap RDP use karein. Yeh session 20 minute baad automatic save hoke close hoga."
           
-          while ($true) { Start-Sleep -Seconds 300 }
+          # 20 minutes wait karega taaki aap kaam kar sakein (Aap isay adjust bhi kar sakte hain)
+          Start-Sleep -Seconds 1200
 
       - name: Backup Chrome Profile to MEGA on Exit
         if: always()
@@ -121,21 +109,18 @@ jobs:
           $env:Path += ";$env:LOCALAPPDATA\MEGAcmd"
           try {
               mega-login $env:MEGA_EMAIL $env:MEGA_PASSWORD
-              Write-Host "Preparing fast Chrome profile backup..."
+              Write-Host "Automatic backup starting..."
               
               Remove-Item "C:\BackupTemp" -Recurse -Force -ErrorAction SilentlyContinue
               New-Item -ItemType Directory -Path "C:\BackupTemp\ChromeData" -Force
               
-              # Copying only Chrome user data (Logins, Gmail session, passwords)
               $chromePath = "C:\Users\RDPUser\AppData\Local\Google\Chrome\User Data"
               if (Test-Path $chromePath) {
                   robocopy "$chromePath" "C:\BackupTemp\ChromeData" /E /ZB /R:1 /W:1 /XD "Cache" "Code Cache" "GPUCache" /NJH /NJS /nc /ns /np /NDL | Out-Null
               }
               
-              Write-Host "Uploading Chrome Data to MEGA..."
               mega-put -c "C:\BackupTemp" /RDP_Chrome_Backup
               Write-Host "Backup completed successfully!"
           } catch {
-              Write-Host "Backup execution failed."
+              Write-Host "Backup failed."
           }
-          
