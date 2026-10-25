@@ -1,4 +1,4 @@
-name: RDP Manual Test Backup
+name: RDP Full Application Data Backup
 
 on:
   workflow_dispatch:
@@ -41,7 +41,7 @@ jobs:
           
           echo "RDP_PASS=$password" >> $env:GITHUB_ENV
 
-      - name: Install MEGAcmd & Restore Chrome Profile
+      - name: Install MEGAcmd & Restore Full AppData
         env:
           MEGA_EMAIL: ${{ secrets.MEGA_EMAIL }}
           MEGA_PASSWORD: ${{ secrets.MEGA_PASSWORD }}
@@ -50,17 +50,24 @@ jobs:
           $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
           $env:Path += ";$env:LOCALAPPDATA\MEGAcmd"
 
+          Write-Host "Logging into MEGA for restore..."
           mega-login $env:MEGA_EMAIL $env:MEGA_PASSWORD
+          
+          Write-Host "Checking for existing backup on MEGA..."
           $checkBackup = mega-ls / 2>&1
-          if ($checkBackup -like "*RDP_Chrome_Backup*") {
+          if ($checkBackup -like "*RDP_FullAppData_Backup*") {
+              Write-Host "Found backup! Downloading..."
               New-Item -ItemType Directory -Path "C:\RestoreTemp" -Force
-              mega-get /RDP_Chrome_Backup "C:\RestoreTemp"
-              New-Item -ItemType Directory -Path "C:\Users\RDPUser\AppData\Local\Google\Chrome" -Force
-              robocopy "C:\RestoreTemp\RDP_Chrome_Backup\ChromeData" "C:\Users\RDPUser\AppData\Local\Google\Chrome\User Data" /E /NJH /NJS /nc /ns /np /NDL | Out-Null
+              mega-get /RDP_FullAppData_Backup "C:\RestoreTemp"
+              
+              Write-Host "Restoring AppData to user profile..."
+              New-Item -ItemType Directory -Path "C:\Users\RDPUser\AppData" -Force
+              robocopy "C:\RestoreTemp\RDP_FullAppData_Backup\AppData" "C:\Users\RDPUser\AppData" /E /NJH /NJS /nc /ns /np /NDL | Out-Null
+              
               Remove-Item "C:\RestoreTemp" -Recurse -Force -ErrorAction SilentlyContinue
-              Write-Host "Restored successfully!"
+              Write-Host "Full AppData restored successfully!"
           } else {
-              Write-Host "No prior backup found."
+              Write-Host "No prior backup found. Starting fresh."
           }
           exit 0
 
@@ -97,11 +104,11 @@ jobs:
           Write-Host " Username : RDPUser"
           Write-Host " Password : $env:RDP_PASS"
           Write-Host "========================================"
-          Write-Host "Keep this window open... Jab kaam ho jaye tab workflow close hone dein."
+          Write-Host "Keep this window open... Jab kaam ho jaye tab window band hone dein."
           
           while ($true) { Start-Sleep -Seconds 300 }
 
-      - name: Backup Chrome Profile to MEGA on Exit
+      - name: Backup Full AppData to MEGA on Exit
         if: always()
         env:
           MEGA_EMAIL: ${{ secrets.MEGA_EMAIL }}
@@ -113,16 +120,16 @@ jobs:
           Write-Host "Logging into MEGA for backup..."
           mega-login $env:MEGA_EMAIL $env:MEGA_PASSWORD
           
-          Write-Host "Preparing backup folder..."
+          Write-Host "Preparing full AppData backup folder..."
           Remove-Item "C:\BackupTemp" -Recurse -Force -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Path "C:\BackupTemp\ChromeData" -Force
+          New-Item -ItemType Directory -Path "C:\BackupTemp\AppData" -Force
           
-          $chromePath = "C:\Users\RDPUser\AppData\Local\Google\Chrome\User Data"
-          if (Test-Path $chromePath) {
-              Write-Host "Copying Chrome files..."
-              robocopy "$chromePath" "C:\BackupTemp\ChromeData" /E /ZB /R:1 /W:1 /XD "Cache" "Code Cache" "GPUCache" /NJH /NJS /nc /ns /np /NDL
+          $appDataPath = "C:\Users\RDPUser\AppData"
+          if (Test-path $appDataPath) {
+              Write-Host "Copying all AppData files (ignoring heavy cache)..."
+              robocopy "$appDataPath" "C:\BackupTemp\AppData" /E /ZB /R:1 /W:1 /XD "Cache" "Code Cache" "GPUCache" /NJH /NJS /nc /ns /np /NDL
           }
           
-          Write-Host "Uploading to MEGA cloud..."
-          mega-put "C:\BackupTemp\ChromeData" /RDP_Chrome_Backup
+          Write-Host "Uploading full AppData to MEGA cloud..."
+          mega-put "C:\BackupTemp" /RDP_FullAppData_Backup
           Write-Host "Backup completed successfully!"
