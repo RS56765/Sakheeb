@@ -46,30 +46,28 @@ jobs:
           MEGA_EMAIL: ${{ secrets.MEGA_EMAIL }}
           MEGA_PASSWORD: ${{ secrets.MEGA_PASSWORD }}
         run: |
-          Write-Host "Installing MEGAcmd via Chocolatey..."
           choco install megacmd -y
-          
           $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-          $megaPath = "$env:LOCALAPPDATA\MEGAcmd"
-          $env:Path += ";$megaPath"
+          $env:Path += ";$env:LOCALAPPDATA\MEGAcmd"
 
           Write-Host "Logging into MEGA..."
           mega-login $env:MEGA_EMAIL $env:MEGA_PASSWORD
           
-          Write-Host "Restoring your data from MEGA..."
+          Write-Host "Checking for existing backup on MEGA..."
           $checkBackup = mega-ls / 2>&1
           if ($checkBackup -like "*RDP_Full_Backup*") {
+              Write-Host "Prior backup found! Downloading from MEGA..."
               New-Item -ItemType Directory -Path "C:\RestoreTemp" -Force
               mega-get /RDP_Full_Backup "C:\RestoreTemp"
               
-              Write-Host "Restoring User Files, Downloads, and AppData..."
-              if (Test-Path "C:\RestoreTemp\Desktop") { Copy-Item "C:\RestoreTemp\Desktop\*" "C:\Users\RDPUser\Desktop" -Recurse -Force -ErrorAction SilentlyContinue }
-              if (Test-Path "C:\RestoreTemp\Documents") { Copy-Item "C:\RestoreTemp\Documents\*" "C:\Users\RDPUser\Documents" -Recurse -Force -ErrorAction SilentlyContinue }
-              if (Test-Path "C:\RestoreTemp\Downloads") { Copy-Item "C:\RestoreTemp\Downloads\*" "C:\Users\RDPUser\Downloads" -Recurse -Force -ErrorAction SilentlyContinue }
-              if (Test-Path "C:\RestoreTemp\AppData") { Copy-Item "C:\RestoreTemp\AppData\*" "C:\Users\RDPUser\AppData" -Recurse -Force -ErrorAction SilentlyContinue }
+              Write-Host "Restoring User Files and AppData..."
+              robocopy "C:\RestoreTemp\RDP_Full_Backup\Desktop" "C:\Users\RDPUser\Desktop" /E /NJH /NJS /nc /ns /np /NDL /XF desktop.ini
+              robocopy "C:\RestoreTemp\RDP_Full_Backup\Documents" "C:\Users\RDPUser\Documents" /E /NJH /NJS /nc /ns /np /NDL /XF desktop.ini
+              robocopy "C:\RestoreTemp\RDP_Full_Backup\Downloads" "C:\Users\RDPUser\Downloads" /E /NJH /NJS /nc /ns /np /NDL /XF desktop.ini
+              robocopy "C:\RestoreTemp\RDP_Full_Backup\AppData" "C:\Users\RDPUser\AppData" /E /NJH /NJS /nc /ns /np /NDL /XF desktop.ini
               
               Remove-Item "C:\RestoreTemp" -Recurse -Force -ErrorAction SilentlyContinue
-              Write-Host "Full Data & App State restored successfully!"
+              Write-Host "Data restored successfully!"
           } else {
               Write-Host "No prior backup found. Starting fresh profile."
           }
@@ -78,7 +76,6 @@ jobs:
         run: |
           $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
           $installerPath = "$env:TEMP\tailscale.msi"
-          
           Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
           Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
           Remove-Item $installerPath -Force
@@ -96,11 +93,7 @@ jobs:
                   $retries++
               }
           }
-          
-          if (-not $tsIP) {
-              Write-Error "Tailscale IP not assigned. Exiting."
-              exit 1
-          }
+          if (-not $tsIP) { Write-Error "Tailscale IP not assigned."; exit 1 }
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
 
       - name: Display Connection Details & Maintain
@@ -117,9 +110,7 @@ jobs:
           Write-Host "========================================"
           Write-Host "Keep this window open..."
           
-          while ($true) {
-              Start-Sleep -Seconds 300
-          }
+          while ($true) { Start-Sleep -Seconds 300 }
 
       - name: Backup User Profile to MEGA on Exit
         if: always()
@@ -128,26 +119,21 @@ jobs:
           MEGA_PASSWORD: ${{ secrets.MEGA_PASSWORD }}
         run: |
           $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-          $megaPath = "$env:LOCALAPPDATA\MEGAcmd"
-          $env:Path += ";$megaPath"
+          $env:Path += ";$env:LOCALAPPDATA\MEGAcmd"
           try {
               mega-login $env:MEGA_EMAIL $env:MEGA_PASSWORD
-              Write-Host "Backing up user files, Chrome data, and AppData to MEGA..."
+              Write-Host "Preparing robust profile backup..."
               
-              # Staging clean folder structure
-              New-Item -ItemType Directory -Path "C:\BackupTemp\Desktop" -Force
-              New-Item -ItemType Directory -Path "C:\BackupTemp\Documents" -Force
-              New-Item -ItemType Directory -Path "C:\BackupTemp\Downloads" -Force
-              New-Item -ItemType Directory -Path "C:\BackupTemp\AppData" -Force
+              # Robust copy using Robocopy to bypass locked AppData files
+              robocopy "C:\Users\RDPUser\Desktop" "C:\BackupTemp\Desktop" /E /ZB /R:1 /W:1 /NJH /NJS /nc /ns /np /NDL
+              robocopy "C:\Users\RDPUser\Documents" "C:\BackupTemp\Documents" /E /ZB /R:1 /W:1 /NJH /NJS /nc /ns /np /NDL
+              robocopy "C:\Users\RDPUser\Downloads" "C:\BackupTemp\Downloads" /E /ZB /R:1 /W:1 /NJH /NJS /nc /ns /np /NDL
+              robocopy "C:\Users\RDPUser\AppData" "C:\BackupTemp\AppData" /E /ZB /R:1 /W:1 /NJH /NJS /nc /ns /np /NDL
               
-              # Copying data safely (ignoring locked system files)
-              Copy-Item "C:\Users\RDPUser\Desktop\*" "C:\BackupTemp\Desktop" -Recurse -Force -ErrorAction SilentlyContinue
-              Copy-Item "C:\Users\RDPUser\Documents\*" "C:\BackupTemp\Documents" -Recurse -Force -ErrorAction SilentlyContinue
-              Copy-Item "C:\Users\RDPUser\Downloads\*" "C:\BackupTemp\Downloads" -Recurse -Force -ErrorAction SilentlyContinue
-              Copy-Item "C:\Users\RDPUser\AppData\*" "C:\BackupTemp\AppData" -Recurse -Force -ErrorAction SilentlyContinue
-              
+              Write-Host "Uploading data to MEGA cloud storage..."
               mega-put -c "C:\BackupTemp" /RDP_Full_Backup
-              Write-Host "Full AppData & Profile Backup completed successfully!"
+              Write-Host "Backup completed successfully!"
           } catch {
-              Write-Host "Backup failed or skipped."
+              Write-Host "Backup execution failed."
           }
+        
