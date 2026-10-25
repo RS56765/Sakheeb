@@ -1,4 +1,4 @@
-name: RDP Auto Backup Timer
+name: RDP Full AppData & Chrome Backup
 
 on:
   workflow_dispatch:
@@ -41,7 +41,7 @@ jobs:
           
           echo "RDP_PASS=$password" >> $env:GITHUB_ENV
 
-      - name: Install MEGAcmd & Restore Chrome Profile
+      - name: Install MEGAcmd & Restore AppData
         env:
           MEGA_EMAIL: ${{ secrets.MEGA_EMAIL }}
           MEGA_PASSWORD: ${{ secrets.MEGA_PASSWORD }}
@@ -52,11 +52,10 @@ jobs:
 
           mega-login $env:MEGA_EMAIL $env:MEGA_PASSWORD
           $checkBackup = mega-ls / 2>&1
-          if ($checkBackup -like "*RDP_Chrome_Backup*") {
+          if ($checkBackup -like "*RDP_FullAppData_Backup*") {
               New-Item -ItemType Directory -Path "C:\RestoreTemp" -Force
-              mega-get /RDP_Chrome_Backup "C:\RestoreTemp"
-              New-Item -ItemType Directory -Path "C:\Users\RDPUser\AppData\Local\Google\Chrome" -Force
-              robocopy "C:\RestoreTemp\RDP_Chrome_Backup\ChromeData" "C:\Users\RDPUser\AppData\Local\Google\Chrome\User Data" /E /NJH /NJS /nc /ns /np /NDL | Out-Null
+              mega-get /RDP_FullAppData_Backup "C:\RestoreTemp"
+              robocopy "C:\RestoreTemp\RDP_FullAppData_Backup\AppData" "C:\Users\RDPUser\AppData" /E /NJH /NJS /nc /ns /np /NDL /XF desktop.ini | Out-Null
               Remove-Item "C:\RestoreTemp" -Recurse -Force -ErrorAction SilentlyContinue
           }
           if ($true) { exit 0 }
@@ -94,12 +93,11 @@ jobs:
           Write-Host " Username : RDPUser"
           Write-Host " Password : $env:RDP_PASS"
           Write-Host "========================================"
-          Write-Host "Aap RDP use karein. Yeh session 20 minute baad automatic save hoke close hoga."
+          Write-Host "Session chal raha hai. 20 minute baad automatic backup upload hoke close hoga."
           
-          # 20 minutes wait karega taaki aap kaam kar sakein (Aap isay adjust bhi kar sakte hain)
           Start-Sleep -Seconds 1200
 
-      - name: Backup Chrome Profile to MEGA on Exit
+      - name: Backup AppData to MEGA on Exit
         if: always()
         env:
           MEGA_EMAIL: ${{ secrets.MEGA_EMAIL }}
@@ -109,18 +107,19 @@ jobs:
           $env:Path += ";$env:LOCALAPPDATA\MEGAcmd"
           try {
               mega-login $env:MEGA_EMAIL $env:MEGA_PASSWORD
-              Write-Host "Automatic backup starting..."
+              Write-Host "Preparing full AppData backup..."
               
               Remove-Item "C:\BackupTemp" -Recurse -Force -ErrorAction SilentlyContinue
-              New-Item -ItemType Directory -Path "C:\BackupTemp\ChromeData" -Force
+              New-Item -ItemType Directory -Path "C:\BackupTemp\AppData" -Force
               
-              $chromePath = "C:\Users\RDPUser\AppData\Local\Google\Chrome\User Data"
-              if (Test-Path $chromePath) {
-                  robocopy "$chromePath" "C:\BackupTemp\ChromeData" /E /ZB /R:1 /W:1 /XD "Cache" "Code Cache" "GPUCache" /NJH /NJS /nc /ns /np /NDL | Out-Null
+              # Copying AppData while ignoring heavy browser caches to save upload speed
+              $appDataPath = "C:\Users\RDPUser\AppData"
+              if (Test-Path $appDataPath) {
+                  robocopy "$appDataPath" "C:\BackupTemp\AppData" /E /ZB /R:1 /W:1 /XD "Cache" "Code Cache" "GPUCache" /NJH /NJS /nc /ns /np /NDL | Out-Null
               }
               
-              mega-put -c "C:\BackupTemp" /RDP_Chrome_Backup
-              Write-Host "Backup completed successfully!"
+              mega-put -c "C:\BackupTemp" /RDP_FullAppData_Backup
+              Write-Host "Full AppData backup completed successfully!"
           } catch {
               Write-Host "Backup failed."
           }
