@@ -1,4 +1,4 @@
-name: RDP with Full User Backup
+name: RDP AppData & Profile Backup
 
 on:
   workflow_dispatch:
@@ -41,7 +41,7 @@ jobs:
           
           echo "RDP_PASS=$password" >> $env:GITHUB_ENV
 
-      - name: Install MEGAcmd & Restore User Profile
+      - name: Install MEGAcmd & Restore AppData
         env:
           MEGA_EMAIL: ${{ secrets.MEGA_EMAIL }}
           MEGA_PASSWORD: ${{ secrets.MEGA_PASSWORD }}
@@ -56,22 +56,18 @@ jobs:
           Write-Host "Checking for existing backup on MEGA..."
           $checkBackup = mega-ls / 2>&1
           if ($checkBackup -like "*RDP_Full_Backup*") {
-              Write-Host "Prior backup found! Downloading from MEGA..."
+              Write-Host "Prior backup found! Downloading AppData from MEGA..."
               New-Item -ItemType Directory -Path "C:\RestoreTemp" -Force
               mega-get /RDP_Full_Backup "C:\RestoreTemp"
               
-              Write-Host "Restoring User Files and AppData..."
-              robocopy "C:\RestoreTemp\RDP_Full_Backup\Desktop" "C:\Users\RDPUser\Desktop" /E /NJH /NJS /nc /ns /np /NDL /XF desktop.ini | Out-Null
-              robocopy "C:\RestoreTemp\RDP_Full_Backup\Documents" "C:\Users\RDPUser\Documents" /E /NJH /NJS /nc /ns /np /NDL /XF desktop.ini | Out-Null
-              robocopy "C:\RestoreTemp\RDP_Full_Backup\Downloads" "C:\Users\RDPUser\Downloads" /E /NJH /NJS /nc /ns /np /NDL /XF desktop.ini | Out-Null
+              Write-Host "Restoring AppData & Logins..."
               robocopy "C:\RestoreTemp\RDP_Full_Backup\AppData" "C:\Users\RDPUser\AppData" /E /NJH /NJS /nc /ns /np /NDL /XF desktop.ini | Out-Null
               
               Remove-Item "C:\RestoreTemp" -Recurse -Force -ErrorAction SilentlyContinue
-              Write-Host "Data restored successfully!"
+              Write-Host "AppData restored successfully!"
           } else {
               Write-Host "No prior backup found. Starting fresh profile."
           }
-          # Force clean exit so exit code 1 never breaks the workflow
           if ($true) { exit 0 }
 
       - name: Install Tailscale
@@ -114,7 +110,7 @@ jobs:
           
           while ($true) { Start-Sleep -Seconds 300 }
 
-      - name: Backup User Profile to MEGA on Exit
+      - name: Backup AppData to MEGA on Exit
         if: always()
         env:
           MEGA_EMAIL: ${{ secrets.MEGA_EMAIL }}
@@ -124,17 +120,14 @@ jobs:
           $env:Path += ";$env:LOCALAPPDATA\MEGAcmd"
           try {
               mega-login $env:MEGA_EMAIL $env:MEGA_PASSWORD
-              Write-Host "Preparing robust profile backup..."
+              Write-Host "Preparing AppData backup..."
               
               Remove-Item "C:\BackupTemp" -Recurse -Force -ErrorAction SilentlyContinue
-              New-Item -ItemType Directory -Path "C:\BackupTemp" -Force
+              New-Item -ItemType Directory -Path "C:\BackupTemp\AppData" -Force
               
-              robocopy "C:\Users\RDPUser\Desktop" "C:\BackupTemp\Desktop" /E /ZB /R:1 /W:1 /NJH /NJS /nc /ns /np /NDL | Out-Null
-              robocopy "C:\Users\RDPUser\Documents" "C:\BackupTemp\Documents" /E /ZB /R:1 /W:1 /NJH /NJS /nc /ns /np /NDL | Out-Null
-              robocopy "C:\Users\RDPUser\Downloads" "C:\BackupTemp\Downloads" /E /ZB /R:1 /W:1 /NJH /NJS /nc /ns /np /NDL | Out-Null
               robocopy "C:\Users\RDPUser\AppData" "C:\BackupTemp\AppData" /E /ZB /R:1 /W:1 /NJH /NJS /nc /ns /np /NDL | Out-Null
               
-              Write-Host "Uploading data to MEGA cloud storage..."
+              Write-Host "Uploading AppData to MEGA cloud storage..."
               mega-put -c "C:\BackupTemp" /RDP_Full_Backup
               Write-Host "Backup completed successfully!"
           } catch {
