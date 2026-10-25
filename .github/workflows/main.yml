@@ -46,13 +46,15 @@ jobs:
           Write-Host "Installing MEGAcmd via Chocolatey..."
           choco install megacmd -y
           
-          # Refresh environment paths
           $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
           $megaPath = "$env:LOCALAPPDATA\MEGAcmd"
           $env:Path += ";$megaPath"
 
           Write-Host "Logging into MEGA..."
-          mega-login "${{ secrets.MEGA_EMAIL }}" "${{ secrets.MEGA_PASSWORD }}"
+          $email = "${{ secrets.MEGA_EMAIL }}"
+          $pass = "${{ secrets.MEGA_PASSWORD }}"
+          
+          mega-login $email $pass
           
           Write-Host "Restoring your data from MEGA..."
           $list = mega-ls /RDP_Full_Backup 2>&1
@@ -60,8 +62,9 @@ jobs:
               mega-get /RDP_Full_Backup "C:\Users\RDPUser"
               Write-Host "Data restored successfully to user profile!"
           } else {
-              Write-Host "No prior backup found. Starting fresh."
+              Write-Host "No prior backup found or restore skipped. Starting fresh."
           }
+        continue-on-error: true
 
       - name: Install Tailscale
         run: |
@@ -117,7 +120,9 @@ jobs:
           $megaPath = "$env:LOCALAPPDATA\MEGAcmd"
           $env:Path += ";$megaPath"
           try {
-              mega-login "${{ secrets.MEGA_EMAIL }}" "${{ secrets.MEGA_PASSWORD }}"
+              $email = "${{ secrets.MEGA_EMAIL }}"
+              $pass = "${{ secrets.MEGA_PASSWORD }}"
+              mega-login $email $pass
               Write-Host "Backing up entire user profile to MEGA..."
               mega-put -c "C:\Users\RDPUser" /RDP_Full_Backup
               Write-Host "Full Profile Backup completed successfully!"
