@@ -43,33 +43,21 @@ jobs:
 
       - name: Install MEGAcmd & Restore User Profile
         run: |
-          Write-Host "Downloading and Installing MEGAcmd..."
-          $megaUrl = "https://mega.nz/MEGAsync/MSI/MEGAcmdSetup64.exe"
-          $installerPath = "$env:TEMP\MEGAcmdSetup64.exe"
+          Write-Host "Installing MEGAcmd via Chocolatey..."
+          choco install megacmd -y
           
-          Invoke-WebRequest -Uri $megaUrl -OutFile $installerPath
-          Start-Process -FilePath $installerPath -ArgumentList "/S" -Wait
-          Remove-Item $installerPath -Force
-
-          # Add MEGAcmd to Path for this session
+          # Refresh environment paths
+          $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
           $megaPath = "$env:LOCALAPPDATA\MEGAcmd"
-          [Environment]::SetEnvironmentVariable("Path", $env:Path + ";$megaPath", [EnvironmentVariableTarget]::Process)
           $env:Path += ";$megaPath"
 
-          # Verify installation
-          if (!(Test-Path "$megaPath\mega-login.bat")) {
-              # Alternative path check if installed globally
-              $megaPath = "C:\Users\runneradmin\AppData\Local\MEGAcmd"
-              $env:Path += ";$megaPath"
-          }
-
           Write-Host "Logging into MEGA..."
-          & "$env:LOCALAPPDATA\MEGAcmd\mega-login.bat" ${{ secrets.MEGA_EMAIL }} ${{ secrets.MEGA_PASSWORD }}
+          mega-login ${{ secrets.MEGA_EMAIL }} ${{ secrets.MEGA_PASSWORD }}
           
           Write-Host "Restoring your data from MEGA..."
-          $list = & "$env:LOCALAPPDATA\MEGAcmd\mega-ls.bat" /RDP_Full_Backup 2>&1
+          $list = mega-ls /RDP_Full_Backup 2>&1
           if ($LASTEXITCODE -eq 0) {
-              & "$env:LOCALAPPDATA\MEGAcmd\mega-get.bat" /RDP_Full_Backup "C:\Users\RDPUser"
+              mega-get /RDP_Full_Backup "C:\Users\RDPUser"
               Write-Host "Data restored successfully to user profile!"
           } else {
               Write-Host "No prior backup found. Starting fresh."
@@ -125,12 +113,13 @@ jobs:
       - name: Backup User Profile to MEGA on Exit
         if: always()
         run: |
+          $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
           $megaPath = "$env:LOCALAPPDATA\MEGAcmd"
-          [Environment]::SetEnvironmentVariable("Path", $env:Path + ";$megaPath", [EnvironmentVariableTarget]::Process)
+          $env:Path += ";$megaPath"
           try {
-              & "$env:LOCALAPPDATA\MEGAcmd\mega-login.bat" ${{ secrets.MEGA_EMAIL }} ${{ secrets.MEGA_PASSWORD }}
+              mega-login ${{ secrets.MEGA_EMAIL }} ${{ secrets.MEGA_PASSWORD }}
               Write-Host "Backing up entire user profile to MEGA..."
-              & "$env:LOCALAPPDATA\MEGAcmd\mega-put.bat" -c "C:\Users\RDPUser" /RDP_Full_Backup
+              mega-put -c "C:\Users\RDPUser" /RDP_Full_Backup
               Write-Host "Full Profile Backup completed successfully!"
           } catch {
               Write-Host "Backup failed or skipped."
