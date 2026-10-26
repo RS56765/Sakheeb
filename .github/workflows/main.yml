@@ -92,10 +92,16 @@ jobs:
 
       - name: Install MEGA CMD
         run: |
-          Write-Host "Choco ke jariye MEGA CMD install ho raha hai..."
-          choco install megacmd -y --no-progress
-          Import-Module $env:ChocolateyInstall\helpers\chocolateyProfile.psm1
-          Update-SessionEnvironment
+          Write-Host "Official Installer se MEGA CMD system wide install ho raha hai..."
+          # Machine wide directory target karne ke liye official MSI use karenge
+          $megaUrl = "https://mega.nz"
+          $megaInstaller = "$env:TEMP\MEGAcmdSetup.msi"
+          Invoke-WebRequest -Uri $megaUrl -OutFile $megaInstaller
+          
+          # Force fully sync background execution hold command
+          Start-Process msiexec.exe -ArgumentList "/i", "`"$megaInstaller`"", "/qn", "/norestart" -Wait
+          Remove-Item $megaInstaller -Force
+          Start-Sleep -Seconds 10
 
       - name: Maintain Connection (Timer Step)
         shell: powershell
@@ -126,23 +132,26 @@ jobs:
         run: |
           Write-Host "[$(Get-Date)] MEGA Backup process start ho raha hai..."
           
-          # MEGA CMD primary installation directory standard paths
+          # Pure machine architecture path definitions
           $megaBaseDir = "C:\Program Files\MEGA CMD"
           if (-not (Test-Path $megaBaseDir)) { $megaBaseDir = "C:\Program Files (x86)\MEGA CMD" }
-          if (-not (Test-Path $megaBaseDir)) { $megaBaseDir = "$env:LOCALAPPDATA\MEGA CMD" }
           
-          Write-Host "Using MEGA Directory: $megaBaseDir"
+          Write-Host "Verified MEGA Directory: $megaBaseDir"
           
-          # Target specific executable engine handlers to avoid environment path problems
           $megaExec = "$megaBaseDir\mega-exec.exe"
           $megaServer = "$megaBaseDir\MegaCMDServer.exe"
           
-          # Background engine service initiate karna important hai choco setup me
-          Write-Host "Starting MEGA CMD Background Engine..."
+          if (-not (Test-Path $megaServer)) {
+              Write-Error "MEGA CMD binary files system me nahi mili! Path check karein."
+              exit 1
+          }
+
+          # Background engine service initialization 
+          Write-Host "Starting MEGA CMD Background Engine Server..."
           Start-Process $megaServer -WindowStyle Hidden
-          Start-Sleep -Seconds 10
+          Start-Sleep -Seconds 15
           
-          # Ab direct execution logic chalega bina global path lookup error ke
+          # Direct backend component triggers
           Write-Host "MEGA Account logging in..."
           & $megaExec login "${{ secrets.MEGA_EMAIL }}" "${{ secrets.MEGA_PASSWORD }}"
           Start-Sleep -Seconds 5
