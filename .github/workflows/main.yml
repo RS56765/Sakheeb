@@ -67,7 +67,7 @@ jobs:
 
       - name: Setup Native Backup System
         run: |
-          # PowerShell script module install karenge jo bina Rclone ke MEGA par data upload kar sake
+          # PowerShell module install karenge jo bina Rclone ke MEGA par data upload kar sake
           Install-Module -Name MegaCmd -Force -SkipPublisherCheck -Scope CurrentUser -AllowClobber
 
       - name: Maintain Connection & Start Auto-Backup Timer
@@ -101,7 +101,7 @@ jobs:
               Start-Sleep -Seconds 300
           }
 
-      # EMERGENCY STEP: Windows native module use karega bina kisi variable dependancy ke
+      # EMERGENCY STEP: Windows native module use karega bina kisi variable dependency ke
       - name: Final Emergency Backup on Cancellation or Timeout
         if: always()
         run: |
