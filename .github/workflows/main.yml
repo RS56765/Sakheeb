@@ -6,38 +6,26 @@ on:
 jobs:
   secure-rdp:
     runs-on: windows-latest
-    timeout-minutes: 360 # GitHub Actions standard runner limit (6 hours)
+    timeout-minutes: 360 
 
     steps:
       - name: Configure Core RDP Settings
         run: |
-          # Enable Remote Desktop and disable Network Level Authentication
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
-                             -Name "fDenyTSConnections" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
-                             -Name "UserAuthentication" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
-                             -Name "SecurityLayer" -Value 0 -Force
-
-          # Remove any existing rule with the same name to avoid duplication
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
           netsh advfirewall firewall delete rule name="RDP-Tailscale"
-          
-          # Allow any incoming connection on port 3389
-          netsh advfirewall firewall add rule name="RDP-Tailscale" `
-            dir=in action=allow protocol=TCP localport=3389
-
-          # Restart the Remote Desktop service to ensure changes take effect
+          netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
           Restart-Service -Name TermService -Force
 
       - name: Create RDP User with Secure Password
         run: |
           Add-Type -AssemblyName System.Security
           $charSet = @{
-              Upper   = [char[]](65..90)      # A-Z
-              Lower   = [char[]](97..122)     # a-z
-              Number  = [char[]](48..57)      # 0-9
-              Special = ([char[]](33..47) + [char[]](58..64) +
-                         [char[]](91..96) + [char[]](123..126)) # Special characters
+              Upper   = [char[]](65..90)
+              Lower   = [char[]](97..122)
+              Number  = [char[]](48..57)
+              Special = ([char[]](33..47) + [char[]](58..64) + [char[]](91..96) + [char[]](123..126))
           }
           $rawPassword = @()
           $rawPassword += $charSet.Upper | Get-Random -Count 4
@@ -49,29 +37,19 @@ jobs:
           New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
           Add-LocalGroupMember -Group "Administrators" -Member "RDP"
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"
-          
           echo "RDP_CREDS=User: RDP | Password: $password" >> $env:GITHUB_ENV
-          
-          if (-not (Get-LocalUser -Name "RDP")) {
-              Write-Error "User creation failed"
-              exit 1
-          }
 
       - name: Install Tailscale
         run: |
           $tsUrl = "https://tailscale.com"
           $installerPath = "$env:TEMP\tailscale.msi"
-          
           Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
           Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
           Remove-Item $installerPath -Force
 
       - name: Establish Tailscale Connection
         run: |
-          # Bring up Tailscale with the provided auth key and set a unique hostname
           & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID
-          
-          # Wait for Tailscale to assign an IP
           $tsIP = $null
           $retries = 0
           while (-not $tsIP -and $retries -lt 10) {
@@ -79,35 +57,31 @@ jobs:
               Start-Sleep -Seconds 5
               $retries++
           }
-          
-          if (-not $tsIP) {
-              Write-Error "Tailscale IP not assigned. Exiting."
-              exit 1
-          }
+          if (-not $tsIP) { exit 1 }
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
       
       - name: Verify RDP Accessibility
         run: |
-          Write-Host "Tailscale IP: $env:TAILSCALE_IP"
-          
-          # Test connectivity using Test-NetConnection against the Tailscale IP on port 3389
           $testResult = Test-NetConnection -ComputerName $env:TAILSCALE_IP -Port 3389
-          if (-not $testResult.TcpTestSucceeded) {
-              Write-Error "TCP connection to RDP port 3389 failed"
-              exit 1
-          }
-          Write-Host "TCP connectivity successful!"
+          if (-not $testResult.TcpTestSucceeded) { exit 1 }
 
-      - name: Install Rclone and Setup MEGA
+      - name: Download Rclone Direct Portable Binary and Setup MEGA
         run: |
-          # Install rclone via chocolatey
-          choco install rclone -y
+          # Create a dedicated permanent folder for Rclone binary
+          New-Item -ItemType Directory -Force -Path "C:\RcloneStudio"
           
-          # Refresh path environment variables for current session
-          $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+          # Download official Rclone windows standalone zip
+          Invoke-WebRequest -Uri "https://rclone.org" -OutFile "C:\RcloneStudio\rclone.zip"
           
-          # Create rclone configuration for MEGA account dynamically using direct path
-          & "C:\ProgramData\chocolatey\bin\rclone.exe" config create mega_backup mega user "${{ secrets.MEGA_USERNAME }}" pass "${{ secrets.MEGA_PASSWORD }}"
+          # Extract the zip file
+          Expand-Archive -Path "C:\RcloneStudio\rclone.zip" -DestinationPath "C:\RcloneStudio\Extracted" -Force
+          
+          # Locate and move the main rclone.exe directly to C:\RcloneStudio\rclone.exe
+          $exePath = Get-ChildItem -Path "C:\RcloneStudio\Extracted" -Filter "rclone.exe" -Recurse | Select-Object -First 1
+          Move-Item -Path $exePath.FullName -Destination "C:\RcloneStudio\rclone.exe" -Force
+          
+          # Configure MEGA remote using our brand new direct binary path
+          & "C:\RcloneStudio\rclone.exe" config create mega_backup mega user "${{ secrets.MEGA_USERNAME }}" pass "${{ secrets.MEGA_PASSWORD }}"
 
       - name: Maintain Connection & Start Auto-Backup Timer
         run: |
@@ -117,19 +91,19 @@ jobs:
           Write-Host "Password: $(echo $env:RDP_CREDS)"
           Write-Host "==================`n"
           
-          # BACKGROUND JOB: Yeh 5.30 ghante baad auto-backup karega agar manual cancel na ho
+          # BACKGROUND JOB: 5.30 ghante baad chalne wala auto-backup
           Start-Job -Name "MegaBackupJob" -ScriptBlock {
               Start-Sleep -Seconds 19800
               
               if (-not (Test-Path "$env:TEMP\backup_done.txt")) {
                   New-Item -Path "$env:TEMP\backup_done.txt" -ItemType File -Force
                   
-                  # Direct executable path use kiya hai kisi bhi path issue se bachne ke liye
-                  & "C:\ProgramData\chocolatey\bin\rclone.exe" copy "$env:USERPROFILE\AppData" "mega_backup:AppData" --update --use-server-modtime
+                  # Permanent absolute manual path execution
+                  & "C:\RcloneStudio\rclone.exe" copy "$env:USERPROFILE\AppData" "mega_backup:AppData" --update --use-server-modtime
               }
           }
 
-          # Keep RDP active indefinitely for work
+          # Keep RDP active
           while ($true) {
               Write-Host "[$(Get-Date)] RDP Active - Use Ctrl+C in workflow to terminate"
               Start-Sleep -Seconds 300
@@ -137,11 +111,10 @@ jobs:
 
       # EMERGENCY STEP: Manual cancel button dabaane par ya timeout hone par yeh backup trigger karega
       - name: Final Emergency Backup on Cancellation or Timeout
-        if: always() # Yeh cancel hone ke baad bhi compulsory chalega
+        if: always()
         run: |
           Write-Host "Checking backup status..."
           
-          # Agar background job ne pehle backup nahi kiya hai, tabhi yeh run hoga
           if (-not (Test-Path "$env:TEMP\backup_done.txt")) {
               Write-Host "Triggering final incremental backup to MEGA before shutdown..."
               New-Item -Path "$env:TEMP\backup_done.txt" -ItemType File -Force
@@ -149,8 +122,8 @@ jobs:
               $localPath = "$env:USERPROFILE\AppData"
               $remotePath = "mega_backup:AppData"
               
-              # Direct binary location se call kiya gaya hai bina environment dependency ke
-              & "C:\ProgramData\chocolatey\bin\rclone.exe" copy "$localPath" "$remotePath" --update --use-server-modtime --verbose
+              # Direct permanent binary execution without any environment issues
+              & "C:\RcloneStudio\rclone.exe" copy "$localPath" "$remotePath" --update --use-server-modtime --verbose
               
               Write-Host "Emergency Backup finished successfully!"
           } else {
