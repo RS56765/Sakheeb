@@ -1,0 +1,96 @@
+name: Automated Windows RDP with Auto Save/Restore
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 360 # 6 Ghante max limit
+
+    steps:
+    - name: 1. Setup Folders and Prepare Scripts
+      shell: powershell
+      run: |
+        New-Item -ItemType Directory -Force -Path "C:\RDP_Scripts"
+        New-Item -ItemType Directory -Force -Path "C:\RDP_Temp"
+
+    - name: 2. Install MEGAcmd
+      shell: powershell
+      run: |
+        Invoke-WebRequest -Uri "https://mega.nz/MEGAsyncSetup64.exe" -OutFile "C:\RDP_Temp\MEGAsyncSetup.exe"
+        Start-Process -FilePath "C:\RDP_Temp\MEGAsyncSetup.exe" -ArgumentList "/S" -Wait
+        $env:Path += ";C:\Users\RunnerAdmin\AppData\Local\MEGAcmd"
+        [Environment]::SetEnvironmentVariable("Path", $env:Path, [EnvironmentVariableTarget]::Machine)
+
+    - name: 3. Restore Data from MEGA (On Startup)
+      shell: powershell
+      env:
+        MEGA_EMAIL: ${{ secrets.MEGA_EMAIL }}
+        MEGA_PASSWORD: ${{ secrets.MEGA_PASSWORD }}
+      run: |
+        $env:Path += ";C:\Users\RunnerAdmin\AppData\Local\MEGAcmd"
+        
+        # MEGA Login
+        mega-login $env:MEGA_EMAIL $env:MEGA_PASSWORD
+
+        # Check if Backup Exists on MEGA and Download
+        Write-Output "Checking for existing backup on MEGA..."
+        mega-get /RDP_Backups/AppDataBackup.zip C:\RDP_Temp\AppDataBackup.zip
+
+        # Extract to AppData Roaming & Local if backup exists
+        if (Test-Path "C:\RDP_Temp\AppDataBackup.zip") {
+            Write-Output "Backup found! Restoring AppData..."
+            Expand-Archive -Path "C:\RDP_Temp\AppDataBackup.zip" -DestinationPath "C:\Users\RunnerAdmin\AppData" -Force
+            Write-Output "Data Successfully Restored!"
+        } else {
+            Write-Output "No previous backup found on MEGA. Starting with a fresh profile."
+        }
+
+    - name: 4. Create Auto-Save Backup Script
+      shell: powershell
+      env:
+        MEGA_EMAIL: ${{ secrets.MEGA_EMAIL }}
+        MEGA_PASSWORD: ${{ secrets.MEGA_PASSWORD }}
+      run: |
+        # Script jo 5 ghante 40 min par auto-run hoga
+        $scriptContent = @"
+        `$env:Path += ';C:\Users\RunnerAdmin\AppData\Local\MEGAcmd'
+        Write-Output 'Starting Automatic Backup to MEGA...'
+
+        # Zip Roaming and Google Chrome data
+        `$BackupZip = 'C:\RDP_Temp\AppDataBackup.zip'
+        `$SourcePaths = @('C:\Users\RunnerAdmin\AppData\Roaming', 'C:\Users\RunnerAdmin\AppData\Local\Google')
+        
+        Compress-Archive -Path `$SourcePaths -DestinationPath `$BackupZip -Force
+
+        # Login and Upload to MEGA
+        mega-login $env:MEGA_EMAIL $env:MEGA_PASSWORD
+        mega-mkdir /RDP_Backups
+        mega-put -f `$BackupZip /RDP_Backups/
+
+        Write-Output 'Backup Successfully Uploaded to MEGA!'
+        "@
+
+        Set-Content -Path "C:\RDP_Scripts\save_data.ps1" -Value $scriptContent
+
+    - name: 5. Schedule Auto-Save Before 6 Hours Limit
+      shell: powershell
+      run: |
+        # 340 minutes (5 Hours 40 Minutes) baad auto-save script chalega
+        $Trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(340)
+        $Action = New-ScheduledTaskAction -Execute "PowerShell.exe" -Argument "-ExecutionPolicy Bypass -File C:\RDP_Scripts\save_data.ps1"
+        
+        Register-ScheduledTask -TaskName "AutoSaveRDPData" -Trigger $Trigger -Action $Action -User "SYSTEM"
+        Write-Output "Auto-Save task scheduled to run in 5 Hours 40 Minutes."
+
+    - name: 6. Setup RDP & Keep Alive (6 Hours)
+      shell: powershell
+      run: |
+        # NGROK ya Tailscale RDP Setup yahan add karein (If needed)
+        # RDP Loop code (6 Ghante RDP on rakhne ke liye):
+        $counter = 0
+        while ($counter -lt 350) {
+            Start-Sleep -Seconds 60
+            $counter++
+        }
