@@ -11,11 +11,11 @@ jobs:
     steps:
       - name: Configure Core RDP Settings
         run: |
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
+          Set-ItemProperty -Path 'HKLM:\System\ControlSet001\Control\Terminal Server' `
                              -Name "fDenyTSConnections" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+          Set-ItemProperty -Path 'HKLM:\System\ControlSet001\Control\Terminal Server\WinStations\RDP-Tcp' `
                              -Name "UserAuthentication" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+          Set-ItemProperty -Path 'HKLM:\System\ControlSet001\Control\Terminal Server\WinStations\RDP-Tcp' `
                              -Name "SecurityLayer" -Value 0 -Force
 
           netsh advfirewall firewall delete rule name="RDP-Tailscale"
@@ -61,7 +61,7 @@ jobs:
 
       - name: Establish Tailscale Connection
         run: |
-          $tsExe = "C:\\Program Files\\Tailscale\\tailscale.exe"
+          $tsExe = "C:\Program Files\Tailscale\tailscale.exe"
           if (-not (Test-Path $tsExe)) { $tsExe = "tailscale" }
           
           Write-Host "Starting Tailscale via: $tsExe"
@@ -90,13 +90,18 @@ jobs:
           }
           Write-Host "Connectivity successful!"
 
-      - name: Install MEGA CMD (Fixed Corrupt File Issue via Winget)
+      - name: Install MEGA CMD (Safe BITS Download & MSI Install)
         run: |
-          Write-Host "Official Winget Repository se MEGA CMD bina kisi corruption ke install ho raha hai..."
-          # Winget Microsoft store package check validation use karega
-          winget install --id Mega.MEGAcmd --silent --accept-source-agreements --accept-package-agreements
+          Write-Host "BITS Transfer Engine ke zariye safe download ho raha hai..."
+          $megaUrl = "https://mega.nz"
+          $megaInstaller = "$env:TEMP\MEGAcmdSetup64.msi"
           
-          Write-Host "Path Refresh check ho raha hai..."
+          # WebRequest ke corrupt hone wale error ko fix karne ke liye BITS use kiya
+          Start-BitsTransfer -Source $megaUrl -Destination $megaInstaller
+          
+          Write-Host "System-wide silent install shuru ho raha hai..."
+          Start-Process msiexec.exe -ArgumentList "/i", "`"$megaInstaller`"", "/qn", "/norestart" -Wait
+          Remove-Item $megaInstaller -Force
           Start-Sleep -Seconds 15
 
       - name: Maintain Connection (Timer Step)
@@ -126,59 +131,46 @@ jobs:
         if: always()
         shell: powershell
         run: |
-          Write-Host "[$(Get-Date)] MEGA Backup process start ho raha hai..."
+          Write-Host "[$(Get-Date)] MEGA Backup process shuru..."
           
-          # Winget default location variable check path
-          $pathsToSearch = @(
-              "C:\Program Files\MEGA CMD",
-              "C:\Program Files (x86)\MEGA CMD",
-              "C:\Users\runneradmin\AppData\Local\MEGA CMD",
-              "$env:LOCALAPPDATA\MEGA CMD"
-          )
+          # MSI install hone ke baad 64-bit architecture folder me file place karta hai
+          $megaBaseDir = "C:\Program Files\MEGA CMD"
+          if (-not (Test-Path $megaBaseDir)) { $megaBaseDir = "C:\Program Files (x86)\MEGA CMD" }
           
-          $megaBaseDir = $null
-          foreach ($path in $pathsToSearch) {
-              if (Test-Path "$path\mega-exec.exe") {
-                  $megaBaseDir = $path
-                  break
-              }
-          }
-          
-          # Backup Fallback: Agar winget path system register na kare toh direct environment fallback verify karega
-          if (-not $megaBaseDir) {
-              $megaBaseDir = "C:\Program Files\MEGA CMD"
-          }
-          
-          Write-Host "Verified MEGA Execution Path: $megaBaseDir"
+          Write-Host "Verified MEGA Execution Location: $megaBaseDir"
           
           $megaExec = "$megaBaseDir\mega-exec.exe"
           $megaServer = "$megaBaseDir\MegaCMDServer.exe"
           
-          # Service start backup logic
-          if (Test-Path $megaServer) {
-              Write-Host "Launching MEGA Background Engine..."
-              $serverProcess = Start-Process $megaServer -WindowStyle Hidden -PassThru
-              Start-Sleep -Seconds 15
+          if (-not (Test-Path $megaExec)) {
+              Write-Error "CRITICAL ERROR: MEGA CMD files verify nahi ho sakin!"
+              exit 1
           }
           
-          # Environment variables injection for direct path call stability
+          # Background Engine Server ko live invoke karna
+          Write-Host "Waking up MEGA Server Process Engine..."
+          $serverProcess = Start-Process $megaServer -WindowStyle Hidden -PassThru
+          Start-Sleep -Seconds 15
+          
+          # Paths refresh securely inject
           $env:PATH = "$megaBaseDir;" + $env:PATH
           
-          Write-Host "Logging into MEGA Account..."
-          & mega-login "${{ secrets.MEGA_EMAIL }}" "${{ secrets.MEGA_PASSWORD }}"
+          Write-Host "Logging into MEGA Cloud Account..."
+          & $megaExec login "${{ secrets.MEGA_EMAIL }}" "${{ secrets.MEGA_PASSWORD }}"
           Start-Sleep -Seconds 10
 
           $localAppData = "C:\Users\RDP\AppData"
           $megaRemoteFolder = "/Appdata"
 
-          Write-Host "Creating 'Appdata' folder in MEGA..."
-          & mega-mkdir $megaRemoteFolder
+          Write-Host "Creating 'Appdata' remote folder..."
+          & $megaExec mkdir $megaRemoteFolder
           Start-Sleep -Seconds 3
 
-          Write-Host "Syncing New AppData (Only new files will be uploaded, no repeats)..."
-          & mega-put -c $localAppData $megaRemoteFolder
+          Write-Host "Uploading new AppData files (Skipping duplicate hash files)..."
+          & $megaExec put -c $localAppData $megaRemoteFolder
           
-          Write-Host "[$(Get-Date)] Cloud Backup successful!"
+          Write-Host "[$(Get-Date)] Cloud Backup completely finished!"
+          Stop-Process -Id $serverProcess.Id -Force
 
       - name: Post-Backup Stay Alive
         if: success()
