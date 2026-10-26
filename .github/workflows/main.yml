@@ -92,16 +92,10 @@ jobs:
 
       - name: Install MEGA CMD
         run: |
-          Write-Host "User-level Installer se MEGA CMD silently install ho raha hai..."
-          # User level exe use kar rahe hain taaki permission block na ho
-          $megaUrl = "https://mega.nz"
-          $megaInstaller = "$env:TEMP\megaCMDUserSetup64.exe"
-          Invoke-WebRequest -Uri $megaUrl -OutFile $megaInstaller
-          
-          # Silent install switch /S machine level path issues bypass karne ke liye
-          Start-Process $megaInstaller -ArgumentList "/S" -Wait
-          Remove-Item $megaInstaller -Force
-          Start-Sleep -Seconds 15
+          Write-Host "Choco ke safe repository se MEGA CMD install ho raha hai..."
+          # Isse corruption error nahi aayegi kyunki choco checksum verify karta hai
+          choco install megacmd -y --no-progress
+          Start-Sleep -Seconds 10
 
       - name: Maintain Connection (Timer Step)
         shell: powershell
@@ -132,27 +126,17 @@ jobs:
         run: |
           Write-Host "[$(Get-Date)] MEGA Backup process start ho raha hai..."
           
-          # User level default installation path definitions
-          $megaBaseDir = "$env:LOCALAPPDATA\MEGA CMD"
-          if (-not (Test-Path $megaBaseDir)) { $megaBaseDir = "C:\Program Files\MEGA CMD" }
-          if (-not (Test-Path $megaBaseDir)) { $megaBaseDir = "C:\Program Files (x86)\MEGA CMD" }
+          # Choco installation ke baad global execution direct path variables
+          $megaExec = "C:\ProgramData\chocolatey\bin\mega-exec.exe"
           
-          Write-Host "Target Directory Found: $megaBaseDir"
+          # Agar choco bin me direct executable na mile to alternative paths verify karega
+          if (-not (Test-Path $megaExec)) { $megaExec = "C:\Program Files\MEGA CMD\mega-exec.exe" }
+          if (-not (Test-Path $megaExec)) { $megaExec = "C:\Program Files (x86)\MEGA CMD\mega-exec.exe" }
+          if (-not (Test-Path $megaExec)) { $megaExec = "$env:LOCALAPPDATA\MEGA CMD\mega-exec.exe" }
           
-          $megaExec = "$megaBaseDir\mega-exec.exe"
-          $megaServer = "$megaBaseDir\MegaCMDServer.exe"
+          Write-Host "Using MEGA Executable Path: $megaExec"
           
-          # Agar service background me crash hui ho toh force wake up karna
-          if (Test-Path $megaServer) {
-              Write-Host "Starting MEGA Engine Server..."
-              Start-Process $megaServer -WindowStyle Hidden
-              Start-Sleep -Seconds 15
-          } else {
-              Write-Error "MEGA CMD ki execution files system me dhoondhi nahi ja saki!"
-              exit 1
-          }
-          
-          # Direct backend API calls
+          # Engine check aur auto-login process
           Write-Host "MEGA Account logging in..."
           & $megaExec login "${{ secrets.MEGA_EMAIL }}" "${{ secrets.MEGA_PASSWORD }}"
           Start-Sleep -Seconds 8
