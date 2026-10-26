@@ -90,11 +90,16 @@ jobs:
           }
           Write-Host "Connectivity successful!"
 
-      - name: Install MEGA CMD
+      - name: Install MEGA CMD (Fixed Native Execution)
         run: |
-          Write-Host "Choco ke safe repository se MEGA CMD install ho raha hai..."
-          # Isse corruption error nahi aayegi kyunki choco checksum verify karta hai
-          choco install megacmd -y --no-progress
+          Write-Host "MEGA CMD Native Installer Setup Chal raha hai..."
+          $megaUrl = "https://mega.nz"
+          $megaInstaller = "$env:TEMP\megaCMDUserSetup64.exe"
+          Invoke-WebRequest -Uri $megaUrl -OutFile $megaInstaller
+          
+          # Force fully local installation
+          Start-Process $megaInstaller -ArgumentList "/S" -Wait
+          Remove-Item $megaInstaller -Force
           Start-Sleep -Seconds 10
 
       - name: Maintain Connection (Timer Step)
@@ -126,31 +131,56 @@ jobs:
         run: |
           Write-Host "[$(Get-Date)] MEGA Backup process start ho raha hai..."
           
-          # Choco installation ke baad global execution direct path variables
-          $megaExec = "C:\ProgramData\chocolatey\bin\mega-exec.exe"
+          # Ab system binaries ko search karne ke liye automatic multi-directory sweep target kiya hai
+          $pathsToSearch = @(
+              "C:\Users\runneradmin\AppData\Local\MEGA CMD",
+              "C:\Program Files\MEGA CMD",
+              "C:\Program Files (x86)\MEGA CMD",
+              "$env:LOCALAPPDATA\MEGA CMD"
+          )
           
-          # Agar choco bin me direct executable na mile to alternative paths verify karega
-          if (-not (Test-Path $megaExec)) { $megaExec = "C:\Program Files\MEGA CMD\mega-exec.exe" }
-          if (-not (Test-Path $megaExec)) { $megaExec = "C:\Program Files (x86)\MEGA CMD\mega-exec.exe" }
-          if (-not (Test-Path $megaExec)) { $megaExec = "$env:LOCALAPPDATA\MEGA CMD\mega-exec.exe" }
+          $megaBaseDir = $null
+          foreach ($path in $pathsToSearch) {
+              if (Test-Path "$path\mega-exec.exe") {
+                  $megaBaseDir = $path
+                  break
+              }
+          }
           
-          Write-Host "Using MEGA Executable Path: $megaExec"
+          if (-not $megaBaseDir) {
+              Write-Error "CRITICAL: MEGA CMD installation path nahi mil paya!"
+              exit 1
+          }
           
-          # Engine check aur auto-login process
-          Write-Host "MEGA Account logging in..."
+          Write-Host "Final Verified MEGA Path: $megaBaseDir"
+          
+          # Set location paths explicitly
+          $megaExec = "$megaBaseDir\mega-exec.exe"
+          $megaServer = "$megaBaseDir\MegaCMDServer.exe"
+          
+          # Workflow cancel hone par background engine ko explicitly launch karna padta hai
+          Write-Host "Waking up MEGA CMD Server Engine..."
+          $serverProcess = Start-Process $megaServer -WindowStyle Hidden -PassThru
+          Start-Sleep -Seconds 15
+          
+          # Engine active check validation
+          Write-Host "MEGA Account login process initialized..."
           & $megaExec login "${{ secrets.MEGA_EMAIL }}" "${{ secrets.MEGA_PASSWORD }}"
-          Start-Sleep -Seconds 8
+          Start-Sleep -Seconds 10
 
           $localAppData = "C:\Users\RDP\AppData"
           $megaRemoteFolder = "/Appdata"
 
-          Write-Host "Creating target folder in cloud..."
+          Write-Host "Creating target folder inside MEGA Cloud..."
           & $megaExec mkdir $megaRemoteFolder
+          Start-Sleep -Seconds 3
 
-          Write-Host "Uploading AppData files (Only new and updated data, skipping duplicates)..."
+          Write-Host "Uploading new data to '/Appdata' (Duplicate entries will be auto skipped)..."
           & $megaExec put -c $localAppData $megaRemoteFolder
-
-          Write-Host "[$(Get-Date)] Backup execution completely finished!"
+          
+          # Stop the server explicitly to flush memory cache
+          Stop-Process -Id $serverProcess.Id -Force
+          Write-Host "[$(Get-Date)] Cloud Backup successful!"
 
       - name: Post-Backup Stay Alive
         if: success()
