@@ -6,7 +6,7 @@ on:
 jobs:
   secure-rdp:
     runs-on: windows-latest
-    timeout-minutes: 360 
+    timeout-minutes: 360 # GitHub Actions ki max limit 6 hours hoti hai
 
     steps:
       - name: Configure Core RDP Settings
@@ -44,13 +44,11 @@ jobs:
           $tsUrl = "https://tailscale.com"
           $installerPath = "$env:TEMP\tailscale.msi"
           Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
-          
-          # Strictly wait until Windows installer completes the background operations
           Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -NoNewWindow -Wait
           
-          # Extra verification check to ensure file is written completely
+          # Wait loop to ensure tailscale.exe is completely written to disk
           $retries = 0
-          while (-not (Test-Path "$env:ProgramFiles\Tailscale\tailscale.exe") -and $retries -lt 12) {
+          while (-not (Test-Path "$env:ProgramFiles\Tailscale\tailscale.exe") -and $retries -lt 15) {
               Start-Sleep -Seconds 5
               $retries++
           }
@@ -58,7 +56,8 @@ jobs:
 
       - name: Establish Tailscale Connection
         run: |
-          $tsPath = "$env:ProgramFiles\Tailscale\tailscale.exe"
+          # Clean path selection without syntax breaking quotes
+          $tsPath = Join-Path $env:ProgramFiles "Tailscale\tailscale.exe"
           & $tsPath up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID
           
           $tsIP = $null
@@ -76,35 +75,22 @@ jobs:
           $testResult = Test-NetConnection -ComputerName $env:TAILSCALE_IP -Port 3389
           if (-not $testResult.TcpTestSucceeded) { exit 1 }
 
-      - name: Setup Windows Native Background Sync Engine
+      - name: Setup Portable Rclone Tool
         run: |
-          # Create permanent folders
-          $rcloneDir = "C:\RcloneStudio"
-          New-Item -ItemType Directory -Force -Path $rcloneDir
+          # Machine ke default C Drive me unique folder setup
+          $targetDir = "C:\RcloneTool"
+          if (-not (Test-Path $targetDir)) { New-Item -ItemType Directory -Force -Path $targetDir }
           
-          # Download and unpack standalone Rclone binary
-          Invoke-WebRequest -Uri "https://rclone.org" -OutFile "$rcloneDir\rclone.zip"
-          Expand-Archive -Path "$rcloneDir\rclone.zip" -DestinationPath "$rcloneDir\Extracted" -Force
-          $exeFile = Get-ChildItem -Path "$rcloneDir\Extracted" -Filter "rclone.exe" -Recurse | Select-Object -First 1
-          Move-Item -Path $exeFile.FullName -Destination "$rcloneDir\rclone.exe" -Force
+          Invoke-WebRequest -Uri "https://rclone.org" -OutFile "$targetDir\rclone.zip"
+          Expand-Archive -Path "$targetDir\rclone.zip" -DestinationPath "$targetDir\Unpacked" -Force
           
-          # Configure remote configuration
-          & "$rcloneDir\rclone.exe" config create mega_backup mega user "${{ secrets.MEGA_USERNAME }}" pass "${{ secrets.MEGA_PASSWORD }}"
+          $exeFile = Get-ChildItem -Path "$targetDir\Unpacked" -Filter "rclone.exe" -Recurse | Select-Object -First 1
+          Move-Item -Path $exeFile.FullName -Destination "$targetDir\rclone.exe" -Force
           
-          # Create a persistent background script that handles the 5.30 hour timer and incremental sync
-          $scriptContent = @"
-          Start-Sleep -Seconds 19800
-          & "$rcloneDir\rclone.exe" copy "$env:USERPROFILE\AppData" "mega_backup:AppData" --update --use-server-modtime
-          "@
-          $scriptContent | Set-Content -Path "$rcloneDir\backup_worker.ps1" -Force
+          # MEGA configuration mapping
+          & "C:\RcloneTool\rclone.exe" config create mega_backup mega user "${{ secrets.MEGA_USERNAME }}" pass "${{ secrets.MEGA_PASSWORD }}"
 
-          # Register this script inside Windows Scheduled Tasks as an Independent System Service
-          # This ensures that even if you click "Cancel Workflow", the Windows system kernel keeps executing this independent task
-          $action = New-ScheduledTaskAction -Execute "PowerShell.exe" -Argument "-NoProfile -WindowStyle Hidden -File C:\RcloneStudio\backup_worker.ps1"
-          $trigger = New-ScheduledTaskTrigger -AtLogOn
-          Register-ScheduledTask -TaskName "MegaEngine" -Action $action -Trigger $trigger -User "SYSTEM" -Force
-
-      - name: Maintain Connection & Start Engine
+      - name: Maintain Connection & Start 5h 40m Backup Timer
         run: |
           Write-Host "`n=== RDP ACCESS ==="
           Write-Host "Address: $env:TAILSCALE_IP"
@@ -112,11 +98,41 @@ jobs:
           Write-Host "Password: $(echo $env:RDP_CREDS)"
           Write-Host "==================`n"
           
-          # Start our independent windows background system engine task immediately
-          Start-ScheduledTask -TaskName "MegaEngine"
+          # BACKGROUND MONITOR: Exact 5 ghante 40 minute ginega aur check-file na milne par auto backup chala dega
+          Start-Job -Name "AutoBackup540" -ScriptBlock {
+              Start-Sleep -Seconds 20400 # 5 Hours and 40 Minutes
+              
+              if (-not (Test-Path "C:\RcloneTool\backup_finished.txt")) {
+                  New-Item -Path "C:\RcloneTool\backup_finished.txt" -ItemType File -Force
+                  
+                  # --update lagaya hai taaki repeat files skip ho jayein aur sirf naya/changed data upload ho
+                  & "C:\RcloneTool\rclone.exe" copy "$env:USERPROFILE\AppData" "mega_backup:AppData" --update --use-server-modtime
+              }
+          }
 
-          # Keep runner active indefinitely for your RDP operations
+          # Keep RDP active
           while ($true) {
-              Write-Host "[$(Get-Date)] RDP Active - System Engines Running Successfully."
+              Write-Host "[$(Get-Date)] RDP Active - Processing tasks..."
               Start-Sleep -Seconds 300
+          }
+
+      # EMERGENCY STEP: Agar aap workflow manually cancel karte hain, toh yeh step execute hoga
+      - name: Final Backup on Workflow Cancellation or Timeout
+        if: always() # Yeh step compulsory chalega chahe cancel ho ya timeout
+        run: |
+          Write-Host "Checking if backup is already created by timer..."
+          
+          # Agar 5.40 ghante wala timer abhi tak poora nahi hua hai, toh yeh immediate upload karega
+          if (-not (Test-Path "C:\RcloneTool\backup_finished.txt")) {
+              Write-Host "Workflow Interrupted! Executing emergency incremental sync to MEGA AppData folder..."
+              New-Item -Path "C:\RcloneTool\backup_finished.txt" -ItemType File -Force
+              
+              $localPath = "$env:USERPROFILE\AppData"
+              $remotePath = "mega_backup:AppData"
+              
+              # Direct absolute portable path execution bina kisi variable issue ke
+              & "C:\RcloneTool\rclone.exe" copy "$localPath" "$remotePath" --update --use-server-modtime --verbose
+              Write-Host "Incremental Emergency Backup completed successfully!"
+          } else {
+              Write-Host "Data already synced by 5.40 Hour timer. Skipping duplicate upload."
           }
