@@ -56,14 +56,11 @@ jobs:
         run: |
           Write-Host "Choco ke jariye Tailscale install ho raha hai..."
           choco install tailscale -y --no-progress
-          
-          # Environment Path ko force refresh karna
           Import-Module $env:ChocolateyInstall\helpers\chocolateyProfile.psm1
           Update-SessionEnvironment
 
       - name: Establish Tailscale Connection
         run: |
-          # Path ko hardcode check karna agar choco path register hone me time le
           $tsExe = "C:\Program Files\Tailscale\tailscale.exe"
           if (-not (Test-Path $tsExe)) { $tsExe = "tailscale" }
           
@@ -97,8 +94,6 @@ jobs:
         run: |
           Write-Host "Choco ke jariye MEGA CMD install ho raha hai..."
           choco install megacmd -y --no-progress
-          
-          # Environment Path ko force refresh karna
           Import-Module $env:ChocolateyInstall\helpers\chocolateyProfile.psm1
           Update-SessionEnvironment
 
@@ -131,25 +126,37 @@ jobs:
         run: |
           Write-Host "[$(Get-Date)] MEGA Backup process start ho raha hai..."
           
-          # Direct application directory path setup taaki environment failure na ho
-          $megaDir = "C:\Program Files\MEGA CMD"
-          if (-not (Test-Path $megaDir)) { $megaDir = "C:\Program Files (x86)\MEGA CMD" }
+          # MEGA CMD primary installation directory standard paths
+          $megaBaseDir = "C:\Program Files\MEGA CMD"
+          if (-not (Test-Path $megaBaseDir)) { $megaBaseDir = "C:\Program Files (x86)\MEGA CMD" }
+          if (-not (Test-Path $megaBaseDir)) { $megaBaseDir = "$env:LOCALAPPDATA\MEGA CMD" }
           
-          # Global PATH me merge karna
-          $env:PATH = "$megaDir;" + $env:PATH
-
-          # Ab binary directly execute hogi
-          & mega-login "${{ secrets.MEGA_EMAIL }}" "${{ secrets.MEGA_PASSWORD }}"
+          Write-Host "Using MEGA Directory: $megaBaseDir"
+          
+          # Target specific executable engine handlers to avoid environment path problems
+          $megaExec = "$megaBaseDir\mega-exec.exe"
+          $megaServer = "$megaBaseDir\MegaCMDServer.exe"
+          
+          # Background engine service initiate karna important hai choco setup me
+          Write-Host "Starting MEGA CMD Background Engine..."
+          Start-Process $megaServer -WindowStyle Hidden
+          Start-Sleep -Seconds 10
+          
+          # Ab direct execution logic chalega bina global path lookup error ke
+          Write-Host "MEGA Account logging in..."
+          & $megaExec login "${{ secrets.MEGA_EMAIL }}" "${{ secrets.MEGA_PASSWORD }}"
+          Start-Sleep -Seconds 5
 
           $localAppData = "C:\Users\RDP\AppData"
           $megaRemoteFolder = "/Appdata"
 
-          & mega-mkdir $megaRemoteFolder
+          Write-Host "Creating target folder in cloud..."
+          & $megaExec mkdir $megaRemoteFolder
 
-          Write-Host "Sirf new aur updated files ko upload kiya ja raha hai (No Duplication)..."
-          & mega-put -c $localAppData $megaRemoteFolder
+          Write-Host "Uploading AppData files (Only new and updated data, skipping duplicates)..."
+          & $megaExec put -c $localAppData $megaRemoteFolder
 
-          Write-Host "[$(Get-Date)] Backup complete ho gaya!"
+          Write-Host "[$(Get-Date)] Backup execution completely finished!"
 
       - name: Post-Backup Stay Alive
         if: success()
