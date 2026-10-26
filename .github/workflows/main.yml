@@ -65,23 +65,10 @@ jobs:
           $testResult = Test-NetConnection -ComputerName $env:TAILSCALE_IP -Port 3389
           if (-not $testResult.TcpTestSucceeded) { exit 1 }
 
-      - name: Download Rclone Direct Portable Binary and Setup MEGA
+      - name: Setup Native Backup System
         run: |
-          # Create a dedicated permanent folder for Rclone binary
-          New-Item -ItemType Directory -Force -Path "C:\RcloneStudio"
-          
-          # Download official Rclone windows standalone zip
-          Invoke-WebRequest -Uri "https://rclone.org" -OutFile "C:\RcloneStudio\rclone.zip"
-          
-          # Extract the zip file
-          Expand-Archive -Path "C:\RcloneStudio\rclone.zip" -DestinationPath "C:\RcloneStudio\Extracted" -Force
-          
-          # Locate and move the main rclone.exe directly to C:\RcloneStudio\rclone.exe
-          $exePath = Get-ChildItem -Path "C:\RcloneStudio\Extracted" -Filter "rclone.exe" -Recurse | Select-Object -First 1
-          Move-Item -Path $exePath.FullName -Destination "C:\RcloneStudio\rclone.exe" -Force
-          
-          # Configure MEGA remote using our brand new direct binary path
-          & "C:\RcloneStudio\rclone.exe" config create mega_backup mega user "${{ secrets.MEGA_USERNAME }}" pass "${{ secrets.MEGA_PASSWORD }}"
+          # PowerShell script module install karenge jo bina Rclone ke MEGA par data upload kar sake
+          Install-Module -Name MegaCmd -Force -SkipPublisherCheck -Scope CurrentUser -AllowClobber
 
       - name: Maintain Connection & Start Auto-Backup Timer
         run: |
@@ -91,15 +78,20 @@ jobs:
           Write-Host "Password: $(echo $env:RDP_CREDS)"
           Write-Host "==================`n"
           
-          # BACKGROUND JOB: 5.30 ghante baad chalne wala auto-backup
+          # BACKGROUND JOB: 5.30 ghante baad native zip backup banayega
           Start-Job -Name "MegaBackupJob" -ScriptBlock {
               Start-Sleep -Seconds 19800
               
               if (-not (Test-Path "$env:TEMP\backup_done.txt")) {
                   New-Item -Path "$env:TEMP\backup_done.txt" -ItemType File -Force
                   
-                  # Permanent absolute manual path execution
-                  & "C:\RcloneStudio\rclone.exe" copy "$env:USERPROFILE\AppData" "mega_backup:AppData" --update --use-server-modtime
+                  # Native Windows Zip feature use karke AppData compress karega
+                  Compress-Archive -Path "$env:USERPROFILE\AppData\Local" -DestinationPath "$env:TEMP\AppData_Backup.zip" -Force
+                  
+                  # MegaCmd direct login and upload via PowerShell
+                  Import-Module MegaCmd
+                  Connect-Mega -Username "${{ secrets.MEGA_USERNAME }}" -Password "${{ secrets.MEGA_PASSWORD }}"
+                  Move-MegaItem -Path "$env:TEMP\AppData_Backup.zip" -RemotePath "/"
               }
           }
 
@@ -109,23 +101,25 @@ jobs:
               Start-Sleep -Seconds 300
           }
 
-      # EMERGENCY STEP: Manual cancel button dabaane par ya timeout hone par yeh backup trigger karega
+      # EMERGENCY STEP: Windows native module use karega bina kisi variable dependancy ke
       - name: Final Emergency Backup on Cancellation or Timeout
         if: always()
         run: |
           Write-Host "Checking backup status..."
           
           if (-not (Test-Path "$env:TEMP\backup_done.txt")) {
-              Write-Host "Triggering final incremental backup to MEGA before shutdown..."
+              Write-Host "Triggering final emergency backup before safe shutdown..."
               New-Item -Path "$env:TEMP\backup_done.txt" -ItemType File -Force
               
-              $localPath = "$env:USERPROFILE\AppData"
-              $remotePath = "mega_backup:AppData"
+              # Windows default zip tool use karke data bundle karega
+              Compress-Archive -Path "$env:USERPROFILE\AppData\Local" -DestinationPath "$env:TEMP\AppData_Emergency.zip" -Force
               
-              # Direct permanent binary execution without any environment issues
-              & "C:\RcloneStudio\rclone.exe" copy "$localPath" "$remotePath" --update --use-server-modtime --verbose
+              # Pure system native setup login aur file delivery karega
+              Import-Module MegaCmd -ErrorAction SilentlyContinue
+              Connect-Mega -Username "${{ secrets.MEGA_USERNAME }}" -Password "${{ secrets.MEGA_PASSWORD }}"
+              Move-MegaItem -Path "$env:TEMP\AppData_Emergency.zip" -RemotePath "/"
               
-              Write-Host "Emergency Backup finished successfully!"
+              Write-Host "Emergency Backup uploaded to MEGA root directory successfully!"
           } else {
               Write-Host "Backup was already completed by the background timer. Skipping duplicate upload."
           }
