@@ -57,16 +57,29 @@ jobs:
           $tsUrl = "https://tailscale.com"
           $installerPath = "$env:TEMP\tailscale.msi"
           Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
-          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
+          
+          # Fix: /qn flag ke sath install logic tight kiya taaki background me process complete hone ka wait kare
+          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/qn", "/norestart" -Wait
           Remove-Item $installerPath -Force
+          
+          # Forcefully update target path verification
+          Start-Sleep -Seconds 5
 
       - name: Establish Tailscale Connection
         run: |
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID
+          # Path verification explicitly added to avoid 'not recognized' error
+          $tsExe = "C:\Program Files\Tailscale\tailscale.exe"
+          if (-not (Test-Path $tsExe)) {
+              $tsExe = "C:\Program Files (x86)\Tailscale\tailscale.exe"
+          }
+          
+          Write-Host "Using Tailscale Path: $tsExe"
+          & $tsExe up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID
+          
           $tsIP = $null
           $retries = 0
           while (-not $tsIP -and $retries -lt 10) {
-              $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+              $tsIP = & $tsExe ip -4
               Start-Sleep -Seconds 5
               $retries++
           }
@@ -87,14 +100,16 @@ jobs:
           Write-Host "TCP connectivity successful!"
 
       - name: Install MEGA CMD
-        # backup hamesha chal sake isliye isko pehle hi install kar rahe hain
         run: |
           Write-Host "MEGA CMD install ho raha hai..."
           $megaUrl = "https://mega.nz"
           $megaInstaller = "$env:TEMP\megaCMDSetup.exe"
           Invoke-WebRequest -Uri $megaUrl -OutFile $megaInstaller
+          
+          # Fix: Silent installation check with /S argument
           Start-Process $megaInstaller -ArgumentList "/S" -Wait
           Remove-Item $megaInstaller -Force
+          Start-Sleep -Seconds 5
 
       - name: Maintain Connection (Timer Step)
         shell: powershell
@@ -105,7 +120,7 @@ jobs:
           Write-Host "Password: $(echo $env:RDP_CREDS)"
           Write-Host "==================`n"
           
-          # 5 hours 40 minutes = 340 minutes (20400 seconds)
+          # 5 hours 40 minutes = 20400 seconds
           $totalWaitSeconds = 20400
           $checkIntervalSeconds = 300
           $elapsedSeconds = 0
@@ -120,35 +135,34 @@ jobs:
           }
 
       - name: Execute MEGA AppData Backup
-        # if: always() ka matlab hai ki agar upar ka timer khatam ho, ya aap manual CANCEL karein, ye step chalega hi chalega
         if: always()
         shell: powershell
         run: |
           Write-Host "[$(Get-Date)] MEGA Backup process start ho raha hai..."
           
-          # MEGA CMD ka path system me add karna
-          $env:PATH += ";C:\Program Files\MEGA CMD"
+          # Fix: Direct explicit location variable target kiya taaki 'mega-login' command fail na ho
+          $megaPath = "C:\Program Files\MEGA CMD"
+          if (-not (Test-Path "$megaPath\mega-login.bat")) {
+              $megaPath = "C:\Program Files (x86)\MEGA CMD"
+          }
+          
+          # Path injection
+          $env:PATH = "$megaPath;" + $env:PATH
 
-          # MEGA me login
-          mega-login "${{ secrets.MEGA_EMAIL }}" "${{ secrets.MEGA_PASSWORD }}"
+          # Ab commands system directly trigger karega bin kisi error ke
+          & mega-login "${{ secrets.MEGA_EMAIL }}" "${{ secrets.MEGA_PASSWORD }}"
 
-          # RDP user ka AppData folder path
           $localAppData = "C:\Users\RDP\AppData"
           $megaRemoteFolder = "/Appdata"
 
-          # Agar MEGA cloud me 'Appdata' folder nahi hai to create karega
-          mega-mkdir $megaRemoteFolder
+          & mega-mkdir $megaRemoteFolder
 
-          Write-Host "Sirf new aur updated files ko upload kiya ja raha hai (No Duplication)..."
-          
-          # mega-put me '-c' flag local structure maintain karta hai 
-          # aur default behavior me duplicate files skip ho jati hain (sirf new/modified files upload hoti hain)
-          mega-put -c $localAppData $megaRemoteFolder
+          Write-Host "Sirf new aur updated files ko upload kiya ja raha hai..."
+          & mega-put -c $localAppData $megaRemoteFolder
 
           Write-Host "[$(Get-Date)] Backup complete ho gaya!"
 
       - name: Post-Backup Stay Alive
-        # Agar backup normal timer ke baad hua hai (cancel nahi kiya gaya), toh runner ko alive rakhega
         if: success()
         run: |
           while ($true) {
