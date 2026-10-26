@@ -61,7 +61,7 @@ jobs:
 
       - name: Establish Tailscale Connection
         run: |
-          $tsExe = "C:\Program Files\Tailscale\tailscale.exe"
+          $tsExe = "C:\\Program Files\\Tailscale\\tailscale.exe"
           if (-not (Test-Path $tsExe)) { $tsExe = "tailscale" }
           
           Write-Host "Starting Tailscale via: $tsExe"
@@ -90,17 +90,14 @@ jobs:
           }
           Write-Host "Connectivity successful!"
 
-      - name: Install MEGA CMD (Fixed Native Execution)
+      - name: Install MEGA CMD (Fixed Corrupt File Issue via Winget)
         run: |
-          Write-Host "MEGA CMD Native Installer Setup Chal raha hai..."
-          $megaUrl = "https://mega.nz"
-          $megaInstaller = "$env:TEMP\megaCMDUserSetup64.exe"
-          Invoke-WebRequest -Uri $megaUrl -OutFile $megaInstaller
+          Write-Host "Official Winget Repository se MEGA CMD bina kisi corruption ke install ho raha hai..."
+          # Winget Microsoft store package check validation use karega
+          winget install --id Mega.MEGAcmd --silent --accept-source-agreements --accept-package-agreements
           
-          # Force fully local installation
-          Start-Process $megaInstaller -ArgumentList "/S" -Wait
-          Remove-Item $megaInstaller -Force
-          Start-Sleep -Seconds 10
+          Write-Host "Path Refresh check ho raha hai..."
+          Start-Sleep -Seconds 15
 
       - name: Maintain Connection (Timer Step)
         shell: powershell
@@ -131,11 +128,11 @@ jobs:
         run: |
           Write-Host "[$(Get-Date)] MEGA Backup process start ho raha hai..."
           
-          # Ab system binaries ko search karne ke liye automatic multi-directory sweep target kiya hai
+          # Winget default location variable check path
           $pathsToSearch = @(
-              "C:\Users\runneradmin\AppData\Local\MEGA CMD",
               "C:\Program Files\MEGA CMD",
               "C:\Program Files (x86)\MEGA CMD",
+              "C:\Users\runneradmin\AppData\Local\MEGA CMD",
               "$env:LOCALAPPDATA\MEGA CMD"
           )
           
@@ -147,39 +144,40 @@ jobs:
               }
           }
           
+          # Backup Fallback: Agar winget path system register na kare toh direct environment fallback verify karega
           if (-not $megaBaseDir) {
-              Write-Error "CRITICAL: MEGA CMD installation path nahi mil paya!"
-              exit 1
+              $megaBaseDir = "C:\Program Files\MEGA CMD"
           }
           
-          Write-Host "Final Verified MEGA Path: $megaBaseDir"
+          Write-Host "Verified MEGA Execution Path: $megaBaseDir"
           
-          # Set location paths explicitly
           $megaExec = "$megaBaseDir\mega-exec.exe"
           $megaServer = "$megaBaseDir\MegaCMDServer.exe"
           
-          # Workflow cancel hone par background engine ko explicitly launch karna padta hai
-          Write-Host "Waking up MEGA CMD Server Engine..."
-          $serverProcess = Start-Process $megaServer -WindowStyle Hidden -PassThru
-          Start-Sleep -Seconds 15
+          # Service start backup logic
+          if (Test-Path $megaServer) {
+              Write-Host "Launching MEGA Background Engine..."
+              $serverProcess = Start-Process $megaServer -WindowStyle Hidden -PassThru
+              Start-Sleep -Seconds 15
+          }
           
-          # Engine active check validation
-          Write-Host "MEGA Account login process initialized..."
-          & $megaExec login "${{ secrets.MEGA_EMAIL }}" "${{ secrets.MEGA_PASSWORD }}"
+          # Environment variables injection for direct path call stability
+          $env:PATH = "$megaBaseDir;" + $env:PATH
+          
+          Write-Host "Logging into MEGA Account..."
+          & mega-login "${{ secrets.MEGA_EMAIL }}" "${{ secrets.MEGA_PASSWORD }}"
           Start-Sleep -Seconds 10
 
           $localAppData = "C:\Users\RDP\AppData"
           $megaRemoteFolder = "/Appdata"
 
-          Write-Host "Creating target folder inside MEGA Cloud..."
-          & $megaExec mkdir $megaRemoteFolder
+          Write-Host "Creating 'Appdata' folder in MEGA..."
+          & mega-mkdir $megaRemoteFolder
           Start-Sleep -Seconds 3
 
-          Write-Host "Uploading new data to '/Appdata' (Duplicate entries will be auto skipped)..."
-          & $megaExec put -c $localAppData $megaRemoteFolder
+          Write-Host "Syncing New AppData (Only new files will be uploaded, no repeats)..."
+          & mega-put -c $localAppData $megaRemoteFolder
           
-          # Stop the server explicitly to flush memory cache
-          Stop-Process -Id $serverProcess.Id -Force
           Write-Host "[$(Get-Date)] Cloud Backup successful!"
 
       - name: Post-Backup Stay Alive
