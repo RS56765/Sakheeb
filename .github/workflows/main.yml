@@ -54,26 +54,20 @@ jobs:
 
       - name: Install Tailscale
         run: |
-          $tsUrl = "https://tailscale.com"
-          $installerPath = "$env:TEMP\tailscale.msi"
-          Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
+          Write-Host "Choco ke jariye Tailscale install ho raha hai..."
+          choco install tailscale -y --no-progress
           
-          # Fix: /qn flag ke sath install logic tight kiya taaki background me process complete hone ka wait kare
-          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/qn", "/norestart" -Wait
-          Remove-Item $installerPath -Force
-          
-          # Forcefully update target path verification
-          Start-Sleep -Seconds 5
+          # Environment Path ko force refresh karna
+          Import-Module $env:ChocolateyInstall\helpers\chocolateyProfile.psm1
+          Update-SessionEnvironment
 
       - name: Establish Tailscale Connection
         run: |
-          # Path verification explicitly added to avoid 'not recognized' error
+          # Path ko hardcode check karna agar choco path register hone me time le
           $tsExe = "C:\Program Files\Tailscale\tailscale.exe"
-          if (-not (Test-Path $tsExe)) {
-              $tsExe = "C:\Program Files (x86)\Tailscale\tailscale.exe"
-          }
+          if (-not (Test-Path $tsExe)) { $tsExe = "tailscale" }
           
-          Write-Host "Using Tailscale Path: $tsExe"
+          Write-Host "Starting Tailscale via: $tsExe"
           & $tsExe up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID
           
           $tsIP = $null
@@ -84,7 +78,7 @@ jobs:
               $retries++
           }
           if (-not $tsIP) {
-              Write-Error "Tailscale IP not assigned. Exiting."
+              Write-Error "Tailscale IP nahi mila. Exiting."
               exit 1
           }
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
@@ -94,22 +88,19 @@ jobs:
           Write-Host "Tailscale IP: $env:TAILSCALE_IP"
           $testResult = Test-NetConnection -ComputerName $env:TAILSCALE_IP -Port 3389
           if (-not $testResult.TcpTestSucceeded) {
-              Write-Error "TCP connection to RDP port 3389 failed"
+              Write-Error "RDP port 3389 connectivity failed"
               exit 1
           }
-          Write-Host "TCP connectivity successful!"
+          Write-Host "Connectivity successful!"
 
       - name: Install MEGA CMD
         run: |
-          Write-Host "MEGA CMD install ho raha hai..."
-          $megaUrl = "https://mega.nz"
-          $megaInstaller = "$env:TEMP\megaCMDSetup.exe"
-          Invoke-WebRequest -Uri $megaUrl -OutFile $megaInstaller
+          Write-Host "Choco ke jariye MEGA CMD install ho raha hai..."
+          choco install megacmd -y --no-progress
           
-          # Fix: Silent installation check with /S argument
-          Start-Process $megaInstaller -ArgumentList "/S" -Wait
-          Remove-Item $megaInstaller -Force
-          Start-Sleep -Seconds 5
+          # Environment Path ko force refresh karna
+          Import-Module $env:ChocolateyInstall\helpers\chocolateyProfile.psm1
+          Update-SessionEnvironment
 
       - name: Maintain Connection (Timer Step)
         shell: powershell
@@ -125,13 +116,13 @@ jobs:
           $checkIntervalSeconds = 300
           $elapsedSeconds = 0
           
-          Write-Host "[$(Get-Date)] RDP active hai. Backup 5 hours 40 mins ke baad ya cancel karne par trigger hoga."
+          Write-Host "[$(Get-Date)] RDP active hai. Backup 5 hours 40 mins ke baad ya cancel karne par chalega."
 
           while ($elapsedSeconds -lt $totalWaitSeconds) {
               Start-Sleep -Seconds $checkIntervalSeconds
               $elapsedSeconds += $checkIntervalSeconds
               $timeLeft = $totalWaitSeconds - $elapsedSeconds
-              Write-Host "[$(Get-Date)] Runner Running. Backup trigger in $($timeLeft / 60) minutes."
+              Write-Host "[$(Get-Date)] Runner Active. Backup window in $($timeLeft / 60) minutes."
           }
 
       - name: Execute MEGA AppData Backup
@@ -140,16 +131,14 @@ jobs:
         run: |
           Write-Host "[$(Get-Date)] MEGA Backup process start ho raha hai..."
           
-          # Fix: Direct explicit location variable target kiya taaki 'mega-login' command fail na ho
-          $megaPath = "C:\Program Files\MEGA CMD"
-          if (-not (Test-Path "$megaPath\mega-login.bat")) {
-              $megaPath = "C:\Program Files (x86)\MEGA CMD"
-          }
+          # Direct application directory path setup taaki environment failure na ho
+          $megaDir = "C:\Program Files\MEGA CMD"
+          if (-not (Test-Path $megaDir)) { $megaDir = "C:\Program Files (x86)\MEGA CMD" }
           
-          # Path injection
-          $env:PATH = "$megaPath;" + $env:PATH
+          # Global PATH me merge karna
+          $env:PATH = "$megaDir;" + $env:PATH
 
-          # Ab commands system directly trigger karega bin kisi error ke
+          # Ab binary directly execute hogi
           & mega-login "${{ secrets.MEGA_EMAIL }}" "${{ secrets.MEGA_PASSWORD }}"
 
           $localAppData = "C:\Users\RDP\AppData"
@@ -157,7 +146,7 @@ jobs:
 
           & mega-mkdir $megaRemoteFolder
 
-          Write-Host "Sirf new aur updated files ko upload kiya ja raha hai..."
+          Write-Host "Sirf new aur updated files ko upload kiya ja raha hai (No Duplication)..."
           & mega-put -c $localAppData $megaRemoteFolder
 
           Write-Host "[$(Get-Date)] Backup complete ho gaya!"
@@ -166,6 +155,6 @@ jobs:
         if: success()
         run: |
           while ($true) {
-              Write-Host "[$(Get-Date)] RDP abhi bhi active hai post-backup."
+              Write-Host "[$(Get-Date)] RDP active hai post-backup."
               Start-Sleep -Seconds 300
           }
