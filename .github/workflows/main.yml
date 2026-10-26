@@ -90,6 +90,11 @@ jobs:
           }
           Write-Host "Connectivity successful!"
 
+      - name: Pre-build Isolated Node Modules (Safe State)
+        # Cancel hone se pehle hi core dependencies environment me fix kar rahe hain
+        run: |
+          npm install megajs archiver --no-audit --no-fund --quiet
+
       - name: Maintain Connection (Timer Step)
         shell: powershell
         run: |
@@ -113,30 +118,100 @@ jobs:
               Write-Host "[$(Get-Date)] Runner Active. Backup window in $($timeLeft / 60) minutes."
           }
 
-      - name: Execute MEGA AppData Backup via MegaNuke Engine
+      - name: Execute MEGA AppData Backup via Embedded Engine
         if: always()
         shell: powershell
         run: |
-          Write-Host "[$(Get-Date)] Standalone PowerShell Cloud Backup Engine shuru ho raha hai..."
+          Write-Host "[$(Get-Date)] Pre-built Embedded Cloud Backup Engine shuru ho raha hai..."
           
-          # Zero-installer API module setup direct from safe source
-          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-          $scriptUrl = "https://githubusercontent.com"
-          $scriptPath = "$env:TEMP\mega_uploader.ps1"
-          
-          Invoke-WebRequest -Uri $scriptUrl -OutFile $scriptPath
-          
-          $email = "${{ secrets.MEGA_EMAIL }}"
-          $password = "${{ secrets.MEGA_PASSWORD }}"
-          $localAppData = "C:\Users\RDP\AppData"
-          
-          Write-Host "Syncing AppData directly to MEGA Account... (Duplicates will be checked automatically)"
-          
-          # Native execution block jo bina kisi library ya installer ke chalega
-          # Yeh MEGA cloud me automatic 'Appdata' variable capture folder handle karta hai
-          & $scriptPath -Username $email -Password $password -LocalPath $localAppData -RemotePath "/Appdata"
-          
-          Write-Host "[$(Get-Date)] Cloud Backup completely finished without any error!"
+          # Pure Javascript native execution injection (No external URL download)
+          $jsCode = @"
+          const { Storage } = require('megajs');
+          const fs = require('fs');
+          const path = require('path');
+          const archiver = require('archiver');
+
+          const email = "${{ secrets.MEGA_EMAIL }}";
+          const password = "${{ secrets.MEGA_PASSWORD }}";
+          const targetPath = "C:\\Users\\RDP\\AppData";
+          const zipPath = path.join(process.env.TEMP, 'Appdata_Backup.zip');
+
+          console.log("Step 1: AppData folder ko background compress (zip) kiya ja raha hai...");
+          const output = fs.createWriteStream(zipPath);
+          const archive = archiver('zip', { zlib: { level: 5 } });
+
+          output.on('close', () => {
+              console.log("Compression complete! Total size: " + archive.pointer() + " bytes");
+              uploadToMega();
+          });
+
+          archive.on('error', (err) => { console.error("Zip Error: ", err); });
+          archive.pipe(output);
+          archive.directory(targetPath, false);
+          archive.finalize();
+
+          function uploadToMega() {
+              console.log("Step 2: Connecting securely to MEGA Cloud API Engine...");
+              const storage = new Storage({ email, password, keepalive: false });
+              
+              storage.login((err) => {
+                  if (err) {
+                      console.error("MEGA Login Failed: ", err);
+                      process.exit(1);
+                  }
+                  console.log("Login Successful! Validating remote folder structure...");
+                  
+                  // Appdata folder handler validation
+                  let targetFolder = storage.root.children.find(c => c.name === 'Appdata' && c.directory);
+                  
+                  if (!targetFolder) {
+                      console.log("Folder nahi mila. Creating 'Appdata' folder in cloud...");
+                      storage.mkdir('Appdata', (mkdirErr, newFolder) => {
+                          if (mkdirErr) { console.error(mkdirErr); process.exit(1); }
+                          performUpload(newFolder);
+                      });
+                  } else {
+                      performUpload(targetFolder);
+                  }
+              });
+
+              function performUpload(folderNode) {
+                  console.log("Step 3: Checking for duplicate backup package file...");
+                  const stats = fs.statSync(zipPath);
+                  
+                  // Smart non-duplication verify check
+                  const duplicateFile = folderNode.children.find(c => c.name === 'Appdata_Backup.zip' && c.size === stats.size);
+                  if (duplicateFile) {
+                      console.log("File identical size ke sath pehle se cloud par maujood hai. Skipping upload.");
+                      cleanup();
+                      return;
+                  }
+
+                  console.log("Uploading unique new AppData files to '/Appdata'...");
+                  const fileStream = fs.createReadStream(zipPath);
+                  const uploadProcess = folderNode.upload({ name: 'Appdata_Backup.zip', size: stats.size }, fileStream);
+                  
+                  uploadProcess.on('complete', (file) => {
+                      console.log("Cloud Backup fully successful!");
+                      cleanup();
+                  });
+
+                  uploadProcess.on('error', (uploadErr) => {
+                      console.error("Upload Error: ", uploadErr);
+                      cleanup();
+                  });
+              }
+
+              function cleanup() {
+                  try { fs.unlinkSync(zipPath); } catch(e) {}
+                  console.log("Execution complete!");
+                  process.exit(0);
+              }
+          }
+          "@
+
+          $jsCode | Out-File -FilePath "$env:TEMP\mega_core_backup.js" -Encoding utf8
+          node "$env:TEMP\mega_core_backup.js"
 
       - name: Post-Backup Stay Alive
         if: success()
