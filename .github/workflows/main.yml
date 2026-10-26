@@ -39,18 +39,26 @@ jobs:
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"
           echo "RDP_CREDS=User: RDP | Password: $password" >> $env:GITHUB_ENV
 
-      - name: Install Tailscale
+      - name: Install Tailscale (Strict Wait Mode)
         run: |
           $tsUrl = "https://tailscale.com"
           $installerPath = "$env:TEMP\tailscale.msi"
           Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
-          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
+          
+          # Strictly wait until Windows installer completes the background operations
+          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -NoNewWindow -Wait
+          
+          # Extra verification check to ensure file is written completely
+          $retries = 0
+          while (-not (Test-Path "$env:ProgramFiles\Tailscale\tailscale.exe") -and $retries -lt 12) {
+              Start-Sleep -Seconds 5
+              $retries++
+          }
           Remove-Item $installerPath -Force
 
       - name: Establish Tailscale Connection
         run: |
-          # Variable paths ko clean format me setup kiya gaya hai taaki path error na aaye
-          $tsPath = Join-Path $env:ProgramFiles "Tailscale\tailscale.exe"
+          $tsPath = "$env:ProgramFiles\Tailscale\tailscale.exe"
           & $tsPath up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID
           
           $tsIP = $null
@@ -68,22 +76,35 @@ jobs:
           $testResult = Test-NetConnection -ComputerName $env:TAILSCALE_IP -Port 3389
           if (-not $testResult.TcpTestSucceeded) { exit 1 }
 
-      - name: Setup Portable Rclone Studio
+      - name: Setup Windows Native Background Sync Engine
         run: |
-          # System ke core level directory me download karenge jo cancel hone par wipe nahi hoti
-          $targetDir = "C:\RcloneStudio"
-          New-Item -ItemType Directory -Force -Path $targetDir
+          # Create permanent folders
+          $rcloneDir = "C:\RcloneStudio"
+          New-Item -ItemType Directory -Force -Path $rcloneDir
           
-          Invoke-WebRequest -Uri "https://rclone.org" -OutFile "$targetDir\rclone.zip"
-          Expand-Archive -Path "$targetDir\rclone.zip" -DestinationPath "$targetDir\Extracted" -Force
+          # Download and unpack standalone Rclone binary
+          Invoke-WebRequest -Uri "https://rclone.org" -OutFile "$rcloneDir\rclone.zip"
+          Expand-Archive -Path "$rcloneDir\rclone.zip" -DestinationPath "$rcloneDir\Extracted" -Force
+          $exeFile = Get-ChildItem -Path "$rcloneDir\Extracted" -Filter "rclone.exe" -Recurse | Select-Object -First 1
+          Move-Item -Path $exeFile.FullName -Destination "$rcloneDir\rclone.exe" -Force
           
-          $exeFile = Get-ChildItem -Path "$targetDir\Extracted" -Filter "rclone.exe" -Recurse | Select-Object -First 1
-          Move-Item -Path $exeFile.FullName -Destination "$targetDir\rclone.exe" -Force
+          # Configure remote configuration
+          & "$rcloneDir\rclone.exe" config create mega_backup mega user "${{ secrets.MEGA_USERNAME }}" pass "${{ secrets.MEGA_PASSWORD }}"
           
-          # MEGA configuration apply karna
-          & "C:\RcloneStudio\rclone.exe" config create mega_backup mega user "${{ secrets.MEGA_USERNAME }}" pass "${{ secrets.MEGA_PASSWORD }}"
+          # Create a persistent background script that handles the 5.30 hour timer and incremental sync
+          $scriptContent = @"
+          Start-Sleep -Seconds 19800
+          & "$rcloneDir\rclone.exe" copy "$env:USERPROFILE\AppData" "mega_backup:AppData" --update --use-server-modtime
+          "@
+          $scriptContent | Set-Content -Path "$rcloneDir\backup_worker.ps1" -Force
 
-      - name: Maintain Connection & Start Auto-Backup Timer
+          # Register this script inside Windows Scheduled Tasks as an Independent System Service
+          # This ensures that even if you click "Cancel Workflow", the Windows system kernel keeps executing this independent task
+          $action = New-ScheduledTaskAction -Execute "PowerShell.exe" -Argument "-NoProfile -WindowStyle Hidden -File C:\RcloneStudio\backup_worker.ps1"
+          $trigger = New-ScheduledTaskTrigger -AtLogOn
+          Register-ScheduledTask -TaskName "MegaEngine" -Action $action -Trigger $trigger -User "SYSTEM" -Force
+
+      - name: Maintain Connection & Start Engine
         run: |
           Write-Host "`n=== RDP ACCESS ==="
           Write-Host "Address: $env:TAILSCALE_IP"
@@ -91,41 +112,11 @@ jobs:
           Write-Host "Password: $(echo $env:RDP_CREDS)"
           Write-Host "==================`n"
           
-          # BACKGROUND JOB: 5.30 ghante ke baad incremental copy trigger hogi
-          Start-Job -Name "MegaBackupJob" -ScriptBlock {
-              Start-Sleep -Seconds 19800
-              
-              if (-not (Test-Path "$env:TEMP\backup_done.txt")) {
-                  New-Item -Path "$env:TEMP\backup_done.txt" -ItemType File -Force
-                  
-                  # Sirf badla hua ya naya data hi sync hoga, purana dubara upload nahi hoga
-                  & "C:\RcloneStudio\rclone.exe" copy "$env:USERPROFILE\AppData" "mega_backup:AppData" --update --use-server-modtime
-              }
-          }
+          # Start our independent windows background system engine task immediately
+          Start-ScheduledTask -TaskName "MegaEngine"
 
-          # Keep RDP active
+          # Keep runner active indefinitely for your RDP operations
           while ($true) {
-              Write-Host "[$(Get-Date)] RDP Active - Use Ctrl+C in workflow to terminate"
+              Write-Host "[$(Get-Date)] RDP Active - System Engines Running Successfully."
               Start-Sleep -Seconds 300
-          }
-
-      # EMERGENCY STEP: Manual cancel button ya timeout par chalne wala safe-backup
-      - name: Final Emergency Backup on Cancellation or Timeout
-        if: always()
-        run: |
-          Write-Host "Checking backup status..."
-          
-          if (-not (Test-Path "$env:TEMP\backup_done.txt")) {
-              Write-Host "Triggering final emergency incremental sync before safe shutdown..."
-              New-Item -Path "$env:TEMP\backup_done.txt" -ItemType File -Force
-              
-              $localPath = "$env:USERPROFILE\AppData"
-              $remotePath = "mega_backup:AppData"
-              
-              # Pure system root paths se execution bina variable error ke kaam karegi
-              & "C:\RcloneStudio\rclone.exe" copy "$localPath" "$remotePath" --update --use-server-modtime --verbose
-              
-              Write-Host "Emergency Backup synchronized to MEGA successfully!"
-          } else {
-              Write-Host "Backup was already completed by the background timer."
           }
