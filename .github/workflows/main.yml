@@ -92,16 +92,16 @@ jobs:
 
       - name: Install MEGA CMD
         run: |
-          Write-Host "Official Installer se MEGA CMD system wide install ho raha hai..."
-          # Machine wide directory target karne ke liye official MSI use karenge
+          Write-Host "User-level Installer se MEGA CMD silently install ho raha hai..."
+          # User level exe use kar rahe hain taaki permission block na ho
           $megaUrl = "https://mega.nz"
-          $megaInstaller = "$env:TEMP\MEGAcmdSetup.msi"
+          $megaInstaller = "$env:TEMP\megaCMDUserSetup64.exe"
           Invoke-WebRequest -Uri $megaUrl -OutFile $megaInstaller
           
-          # Force fully sync background execution hold command
-          Start-Process msiexec.exe -ArgumentList "/i", "`"$megaInstaller`"", "/qn", "/norestart" -Wait
+          # Silent install switch /S machine level path issues bypass karne ke liye
+          Start-Process $megaInstaller -ArgumentList "/S" -Wait
           Remove-Item $megaInstaller -Force
-          Start-Sleep -Seconds 10
+          Start-Sleep -Seconds 15
 
       - name: Maintain Connection (Timer Step)
         shell: powershell
@@ -132,29 +132,30 @@ jobs:
         run: |
           Write-Host "[$(Get-Date)] MEGA Backup process start ho raha hai..."
           
-          # Pure machine architecture path definitions
-          $megaBaseDir = "C:\Program Files\MEGA CMD"
+          # User level default installation path definitions
+          $megaBaseDir = "$env:LOCALAPPDATA\MEGA CMD"
+          if (-not (Test-Path $megaBaseDir)) { $megaBaseDir = "C:\Program Files\MEGA CMD" }
           if (-not (Test-Path $megaBaseDir)) { $megaBaseDir = "C:\Program Files (x86)\MEGA CMD" }
           
-          Write-Host "Verified MEGA Directory: $megaBaseDir"
+          Write-Host "Target Directory Found: $megaBaseDir"
           
           $megaExec = "$megaBaseDir\mega-exec.exe"
           $megaServer = "$megaBaseDir\MegaCMDServer.exe"
           
-          if (-not (Test-Path $megaServer)) {
-              Write-Error "MEGA CMD binary files system me nahi mili! Path check karein."
+          # Agar service background me crash hui ho toh force wake up karna
+          if (Test-Path $megaServer) {
+              Write-Host "Starting MEGA Engine Server..."
+              Start-Process $megaServer -WindowStyle Hidden
+              Start-Sleep -Seconds 15
+          } else {
+              Write-Error "MEGA CMD ki execution files system me dhoondhi nahi ja saki!"
               exit 1
           }
-
-          # Background engine service initialization 
-          Write-Host "Starting MEGA CMD Background Engine Server..."
-          Start-Process $megaServer -WindowStyle Hidden
-          Start-Sleep -Seconds 15
           
-          # Direct backend component triggers
+          # Direct backend API calls
           Write-Host "MEGA Account logging in..."
           & $megaExec login "${{ secrets.MEGA_EMAIL }}" "${{ secrets.MEGA_PASSWORD }}"
-          Start-Sleep -Seconds 5
+          Start-Sleep -Seconds 8
 
           $localAppData = "C:\Users\RDP\AppData"
           $megaRemoteFolder = "/Appdata"
