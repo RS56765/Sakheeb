@@ -1,4 +1,4 @@
-name: RDP
+name: RDP-with-MEGA-AppData-Backup
 
 on:
   workflow_dispatch:
@@ -6,16 +6,22 @@ on:
 jobs:
   secure-rdp:
     runs-on: windows-latest
-    timeout-minutes: 360 # GitHub Actions ki max limit 6 hours hoti hai
+    timeout-minutes: 3600
 
     steps:
       - name: Configure Core RDP Settings
         run: |
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
+                             -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+                             -Name "UserAuthentication" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+                             -Name "SecurityLayer" -Value 0 -Force
+
           netsh advfirewall firewall delete rule name="RDP-Tailscale"
-          netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
+          netsh advfirewall firewall add rule name="RDP-Tailscale" `
+            dir=in action=allow protocol=TCP localport=3389
+
           Restart-Service -Name TermService -Force
 
       - name: Create RDP User with Secure Password
@@ -25,7 +31,8 @@ jobs:
               Upper   = [char[]](65..90)
               Lower   = [char[]](97..122)
               Number  = [char[]](48..57)
-              Special = ([char[]](33..47) + [char[]](58..64) + [char[]](91..96) + [char[]](123..126))
+              Special = ([char[]](33..47) + [char[]](58..64) +
+                         [char[]](91..96) + [char[]](123..126))
           }
           $rawPassword = @()
           $rawPassword += $charSet.Upper | Get-Random -Count 4
@@ -37,60 +44,60 @@ jobs:
           New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
           Add-LocalGroupMember -Group "Administrators" -Member "RDP"
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"
+          
           echo "RDP_CREDS=User: RDP | Password: $password" >> $env:GITHUB_ENV
+          
+          if (-not (Get-LocalUser -Name "RDP")) {
+              Write-Error "User creation failed"
+              exit 1
+          }
 
-      - name: Install Tailscale (Strict Wait Mode)
+      - name: Install Tailscale
         run: |
           $tsUrl = "https://tailscale.com"
           $installerPath = "$env:TEMP\tailscale.msi"
           Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
-          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -NoNewWindow -Wait
-          
-          # Wait loop to ensure tailscale.exe is completely written to disk
-          $retries = 0
-          while (-not (Test-Path "$env:ProgramFiles\Tailscale\tailscale.exe") -and $retries -lt 15) {
-              Start-Sleep -Seconds 5
-              $retries++
-          }
+          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
           Remove-Item $installerPath -Force
 
       - name: Establish Tailscale Connection
         run: |
-          # Clean path selection without syntax breaking quotes
-          $tsPath = Join-Path $env:ProgramFiles "Tailscale\tailscale.exe"
-          & $tsPath up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID
-          
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID
           $tsIP = $null
           $retries = 0
           while (-not $tsIP -and $retries -lt 10) {
-              $tsIP = & $tsPath ip -4
+              $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
               Start-Sleep -Seconds 5
               $retries++
           }
-          if (-not $tsIP) { exit 1 }
+          if (-not $tsIP) {
+              Write-Error "Tailscale IP not assigned. Exiting."
+              exit 1
+          }
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
       
       - name: Verify RDP Accessibility
         run: |
+          Write-Host "Tailscale IP: $env:TAILSCALE_IP"
           $testResult = Test-NetConnection -ComputerName $env:TAILSCALE_IP -Port 3389
-          if (-not $testResult.TcpTestSucceeded) { exit 1 }
+          if (-not $testResult.TcpTestSucceeded) {
+              Write-Error "TCP connection to RDP port 3389 failed"
+              exit 1
+          }
+          Write-Host "TCP connectivity successful!"
 
-      - name: Setup Portable Rclone Tool
+      - name: Install MEGA CMD
+        # backup hamesha chal sake isliye isko pehle hi install kar rahe hain
         run: |
-          # Machine ke default C Drive me unique folder setup
-          $targetDir = "C:\RcloneTool"
-          if (-not (Test-Path $targetDir)) { New-Item -ItemType Directory -Force -Path $targetDir }
-          
-          Invoke-WebRequest -Uri "https://rclone.org" -OutFile "$targetDir\rclone.zip"
-          Expand-Archive -Path "$targetDir\rclone.zip" -DestinationPath "$targetDir\Unpacked" -Force
-          
-          $exeFile = Get-ChildItem -Path "$targetDir\Unpacked" -Filter "rclone.exe" -Recurse | Select-Object -First 1
-          Move-Item -Path $exeFile.FullName -Destination "$targetDir\rclone.exe" -Force
-          
-          # MEGA configuration mapping
-          & "C:\RcloneTool\rclone.exe" config create mega_backup mega user "${{ secrets.MEGA_USERNAME }}" pass "${{ secrets.MEGA_PASSWORD }}"
+          Write-Host "MEGA CMD install ho raha hai..."
+          $megaUrl = "https://mega.nz"
+          $megaInstaller = "$env:TEMP\megaCMDSetup.exe"
+          Invoke-WebRequest -Uri $megaUrl -OutFile $megaInstaller
+          Start-Process $megaInstaller -ArgumentList "/S" -Wait
+          Remove-Item $megaInstaller -Force
 
-      - name: Maintain Connection & Start 5h 40m Backup Timer
+      - name: Maintain Connection (Timer Step)
+        shell: powershell
         run: |
           Write-Host "`n=== RDP ACCESS ==="
           Write-Host "Address: $env:TAILSCALE_IP"
@@ -98,41 +105,53 @@ jobs:
           Write-Host "Password: $(echo $env:RDP_CREDS)"
           Write-Host "==================`n"
           
-          # BACKGROUND MONITOR: Exact 5 ghante 40 minute ginega aur check-file na milne par auto backup chala dega
-          Start-Job -Name "AutoBackup540" -ScriptBlock {
-              Start-Sleep -Seconds 20400 # 5 Hours and 40 Minutes
-              
-              if (-not (Test-Path "C:\RcloneTool\backup_finished.txt")) {
-                  New-Item -Path "C:\RcloneTool\backup_finished.txt" -ItemType File -Force
-                  
-                  # --update lagaya hai taaki repeat files skip ho jayein aur sirf naya/changed data upload ho
-                  & "C:\RcloneTool\rclone.exe" copy "$env:USERPROFILE\AppData" "mega_backup:AppData" --update --use-server-modtime
-              }
-          }
-
-          # Keep RDP active
-          while ($true) {
-              Write-Host "[$(Get-Date)] RDP Active - Processing tasks..."
-              Start-Sleep -Seconds 300
-          }
-
-      # EMERGENCY STEP: Agar aap workflow manually cancel karte hain, toh yeh step execute hoga
-      - name: Final Backup on Workflow Cancellation or Timeout
-        if: always() # Yeh step compulsory chalega chahe cancel ho ya timeout
-        run: |
-          Write-Host "Checking if backup is already created by timer..."
+          # 5 hours 40 minutes = 340 minutes (20400 seconds)
+          $totalWaitSeconds = 20400
+          $checkIntervalSeconds = 300
+          $elapsedSeconds = 0
           
-          # Agar 5.40 ghante wala timer abhi tak poora nahi hua hai, toh yeh immediate upload karega
-          if (-not (Test-Path "C:\RcloneTool\backup_finished.txt")) {
-              Write-Host "Workflow Interrupted! Executing emergency incremental sync to MEGA AppData folder..."
-              New-Item -Path "C:\RcloneTool\backup_finished.txt" -ItemType File -Force
-              
-              $localPath = "$env:USERPROFILE\AppData"
-              $remotePath = "mega_backup:AppData"
-              
-              # Direct absolute portable path execution bina kisi variable issue ke
-              & "C:\RcloneTool\rclone.exe" copy "$localPath" "$remotePath" --update --use-server-modtime --verbose
-              Write-Host "Incremental Emergency Backup completed successfully!"
-          } else {
-              Write-Host "Data already synced by 5.40 Hour timer. Skipping duplicate upload."
+          Write-Host "[$(Get-Date)] RDP active hai. Backup 5 hours 40 mins ke baad ya cancel karne par trigger hoga."
+
+          while ($elapsedSeconds -lt $totalWaitSeconds) {
+              Start-Sleep -Seconds $checkIntervalSeconds
+              $elapsedSeconds += $checkIntervalSeconds
+              $timeLeft = $totalWaitSeconds - $elapsedSeconds
+              Write-Host "[$(Get-Date)] Runner Running. Backup trigger in $($timeLeft / 60) minutes."
+          }
+
+      - name: Execute MEGA AppData Backup
+        # if: always() ka matlab hai ki agar upar ka timer khatam ho, ya aap manual CANCEL karein, ye step chalega hi chalega
+        if: always()
+        shell: powershell
+        run: |
+          Write-Host "[$(Get-Date)] MEGA Backup process start ho raha hai..."
+          
+          # MEGA CMD ka path system me add karna
+          $env:PATH += ";C:\Program Files\MEGA CMD"
+
+          # MEGA me login
+          mega-login "${{ secrets.MEGA_EMAIL }}" "${{ secrets.MEGA_PASSWORD }}"
+
+          # RDP user ka AppData folder path
+          $localAppData = "C:\Users\RDP\AppData"
+          $megaRemoteFolder = "/Appdata"
+
+          # Agar MEGA cloud me 'Appdata' folder nahi hai to create karega
+          mega-mkdir $megaRemoteFolder
+
+          Write-Host "Sirf new aur updated files ko upload kiya ja raha hai (No Duplication)..."
+          
+          # mega-put me '-c' flag local structure maintain karta hai 
+          # aur default behavior me duplicate files skip ho jati hain (sirf new/modified files upload hoti hain)
+          mega-put -c $localAppData $megaRemoteFolder
+
+          Write-Host "[$(Get-Date)] Backup complete ho gaya!"
+
+      - name: Post-Backup Stay Alive
+        # Agar backup normal timer ke baad hua hai (cancel nahi kiya gaya), toh runner ko alive rakhega
+        if: success()
+        run: |
+          while ($true) {
+              Write-Host "[$(Get-Date)] RDP abhi bhi active hai post-backup."
+              Start-Sleep -Seconds 300
           }
