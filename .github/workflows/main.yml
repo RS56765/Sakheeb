@@ -30,28 +30,19 @@ jobs:
           
           echo "RDP_PASSWORD=$password" >> $env:GITHUB_ENV
 
-      - name: Install Tailscale via Chocolatey
-        run: |
-          Write-Host "Installing Tailscale using Chocolatey..."
-          choco install tailscale -y
-          
-          Import-Module $env:ChocolateyInstall\helpers\chocolateyProfile.psm1
-          Update-SessionEnvironment
-          
-          if (Test-Path "$env:ProgramFiles\Tailscale\tailscale.exe") {
-              Write-Host "Tailscale installed successfully!"
-          } else {
-              Write-Error "Tailscale installation failed."
-              exit 1
-          }
+      # Official Tailscale Action jo Windows system me safely login setup kar dega
+      - name: Connect to Tailscale Official Action
+        uses: tailscale/github-action@v3
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTH_KEY }}
+          hostname: github-free-rdp
 
-      - name: Establish Tailscale Connection
+      - name: Verify Tailscale IP
         run: |
           $tsExe = "$env:ProgramFiles\Tailscale\tailscale.exe"
           
-          Write-Host "Forcing Tailscale background service configuration..."
-          # Windows execution policy override ke sath explicit binary execution
-          cmd.exe /c "`"$tsExe`" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=github-free-rdp --ephemeral --accept-routes"
+          # System setup check karna aur fixed hostname apply karna
+          & $tsExe up --hostname=github-free-rdp --ephemeral --accept-routes
           
           $tsIP = $null
           $retries = 0
@@ -62,7 +53,7 @@ jobs:
           }
           
           if (-not $tsIP) {
-              Write-Error "Tailscale IP assignment failed. Bypassing fallback environment."
+              Write-Error "Tailscale IP assignment failed."
               exit 1
           }
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
