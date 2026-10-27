@@ -46,13 +46,11 @@ jobs:
           }
 
       - name: Establish Tailscale Connection
-        env:
-          TS_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
         run: |
           $tsExe = "$env:ProgramFiles\Tailscale\tailscale.exe"
           
-          # Environment variable se key uthakar up command chalana
-          & $tsExe up --authkey=$env:TS_KEY --hostname=github-free-rdp --ephemeral --accept-routes
+          # Direct string injection ke sath bina kisi extra check ke force login
+          & $tsExe up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" --hostname=github-free-rdp --ephemeral --accept-routes
           
           $tsIP = $null
           $retries = 0
@@ -63,7 +61,7 @@ jobs:
           }
           
           if (-not $tsIP) {
-              Write-Error "Tailscale IP assignment failed. Please check your Auth Key in Secrets."
+              Write-Error "Tailscale IP assignment failed."
               exit 1
           }
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
