@@ -46,15 +46,20 @@ jobs:
           }
 
       - name: Establish Tailscale Connection
+        env:
+          TAILSCALE_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
         run: |
           $tsExe = "$env:ProgramFiles\Tailscale\tailscale.exe"
           
-          # Direct string injection ke sath bina kisi extra check ke force login
-          & $tsExe up --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" --hostname=github-free-rdp --ephemeral --accept-routes
+          # Environment block se securely key read karna
+          $key = $env:TAILSCALE_KEY
+          
+          Write-Host "Starting Tailscale connection..."
+          & $tsExe up --authkey=$key --hostname=github-free-rdp --ephemeral --accept-routes
           
           $tsIP = $null
           $retries = 0
-          while (-not $tsIP -and $retries -lt 6) {
+          while (-not $tsIP -and $retries -lt 8) {
               $tsIP = & $tsExe ip -4
               Start-Sleep -Seconds 5
               $retries++
