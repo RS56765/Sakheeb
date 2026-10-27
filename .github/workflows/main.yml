@@ -35,11 +35,11 @@ jobs:
 
       - name: Install Tailscale
         run: |
-          # Sahi aur direct latest MSI installer URL
+          # Sahi aur direct Windows 64-bit MSI stable URL
           $tsUrl = "https://tailscale.com"
           $installerPath = "$env:TEMP\tailscale.msi"
           
-          Write-Host "Downloading Tailscale from official package repo..."
+          Write-Host "Downloading Tailscale official MSI installer..."
           Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
           
           Write-Host "Installing Tailscale quietly..."
