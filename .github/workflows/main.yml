@@ -35,22 +35,35 @@ jobs:
 
       - name: Install Tailscale
         run: |
+          # 2026 stable version ka exact .msi download link
           $tsUrl = "https://tailscale.com"
           $installerPath = "$env:TEMP\tailscale.msi"
           
+          Write-Host "Downloading Tailscale..."
           Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
+          
+          Write-Host "Installing Tailscale quietly..."
           Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
+          
+          # Verification ki Tailscale sahi jagah install hua ya nahi
+          if (Test-Path "$env:ProgramFiles\Tailscale\tailscale.exe") {
+              Write-Host "Tailscale installed successfully!"
+          } else {
+              Write-Error "Tailscale installation failed."
+              exit 1
+          }
           Remove-Item $installerPath -Force
 
       - name: Establish Tailscale Connection
         run: |
-          # --hostname ko fix rakha hai aur --ephemeral lagaya hai taaki har baar auto-clean ho jaye
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=github-free-rdp --ephemeral --accept-routes
+          # Tailscale ko path variable ke sath call kiya hai
+          $tsExe = "$env:ProgramFiles\Tailscale\tailscale.exe"
+          & $tsExe up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=github-free-rdp --ephemeral --accept-routes
           
           $tsIP = $null
           $retries = 0
           while (-not $tsIP -and $retries -lt 10) {
-              $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+              $tsIP = & $tsExe ip -4
               Start-Sleep -Seconds 5
               $retries++
           }
