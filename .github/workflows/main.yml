@@ -33,17 +33,15 @@ jobs:
           
           echo "RDP_PASSWORD=$password" >> $env:GITHUB_ENV
 
-      - name: Install Tailscale
+      - name: Install Tailscale via Chocolatey
         run: |
-          # Sahi aur direct Windows 64-bit MSI stable URL
-          $tsUrl = "https://tailscale.com"
-          $installerPath = "$env:TEMP\tailscale.msi"
+          # Choco ka use karke direct official installer background me chalega bina kisi URL link issue ke
+          Write-Host "Installing Tailscale using Chocolatey..."
+          choco install tailscale -y
           
-          Write-Host "Downloading Tailscale official MSI installer..."
-          Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
-          
-          Write-Host "Installing Tailscale quietly..."
-          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
+          # Refresh env variables taaki system new path recognize kar sake
+          Import-Module $env:ChocolateyInstall\helpers\chocolateyProfile.psm1
+          Update-SessionEnvironment
           
           # Verification ki Tailscale sahi jagah install hua ya nahi
           if (Test-Path "$env:ProgramFiles\Tailscale\tailscale.exe") {
@@ -52,11 +50,10 @@ jobs:
               Write-Error "Tailscale installation failed."
               exit 1
           }
-          Remove-Item $installerPath -Force
 
       - name: Establish Tailscale Connection
         run: |
-          # Tailscale ko path variable ke sath call kiya hai
+          # Tailscale ko secure path se call karna
           $tsExe = "$env:ProgramFiles\Tailscale\tailscale.exe"
           & $tsExe up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=github-free-rdp --ephemeral --accept-routes
           
