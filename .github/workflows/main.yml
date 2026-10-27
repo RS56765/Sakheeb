@@ -11,19 +11,16 @@ jobs:
     steps:
       - name: Configure Core RDP Settings
         run: |
-          # Remote Desktop ko enable aur NLA ko configure karna
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
 
-          # Firewall me port 3389 allow karna
           netsh advfirewall firewall delete rule name="RDP-Tailscale"
           netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
           Restart-Service -Name TermService -Force
 
       - name: Create RDP User with Fixed Password
         run: |
-          # Yahan aap apna manpasand password daal sakte hain (Jo mobile app me yaad rahe)
           $password = "MySecurePass123!" 
           $securePass = ConvertTo-SecureString $password -AsPlainText -Force
           
@@ -35,15 +32,12 @@ jobs:
 
       - name: Install Tailscale via Chocolatey
         run: |
-          # Choco ka use karke direct official installer background me chalega bina kisi URL link issue ke
           Write-Host "Installing Tailscale using Chocolatey..."
           choco install tailscale -y
           
-          # Refresh env variables taaki system new path recognize kar sake
           Import-Module $env:ChocolateyInstall\helpers\chocolateyProfile.psm1
           Update-SessionEnvironment
           
-          # Verification ki Tailscale sahi jagah install hua ya nahi
           if (Test-Path "$env:ProgramFiles\Tailscale\tailscale.exe") {
               Write-Host "Tailscale installed successfully!"
           } else {
@@ -52,21 +46,24 @@ jobs:
           }
 
       - name: Establish Tailscale Connection
+        env:
+          TS_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
         run: |
-          # Tailscale ko secure path se call karna
           $tsExe = "$env:ProgramFiles\Tailscale\tailscale.exe"
-          & $tsExe up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=github-free-rdp --ephemeral --accept-routes
+          
+          # Environment variable se key uthakar up command chalana
+          & $tsExe up --authkey=$env:TS_KEY --hostname=github-free-rdp --ephemeral --accept-routes
           
           $tsIP = $null
           $retries = 0
-          while (-not $tsIP -and $retries -lt 10) {
+          while (-not $tsIP -and $retries -lt 6) {
               $tsIP = & $tsExe ip -4
               Start-Sleep -Seconds 5
               $retries++
           }
           
           if (-not $tsIP) {
-              Write-Error "Tailscale IP assignment failed."
+              Write-Error "Tailscale IP assignment failed. Please check your Auth Key in Secrets."
               exit 1
           }
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
@@ -80,7 +77,6 @@ jobs:
           Write-Host "Password: $env:RDP_PASSWORD"
           Write-Host "===============================`n"
           
-          # Loop jo 6 ghante tak environment ko active rakhega
           while ($true) {
               Write-Host "[$(Get-Date)] RDP Server is running safely on Tailnet..."
               Start-Sleep -Seconds 300
