@@ -6,7 +6,7 @@ on:
 jobs:
   secure-rdp:
     runs-on: windows-latest
-    timeout-minutes: 360 # GitHub hosted runner ki maximum limit 6 ghante hai
+    timeout-minutes: 360
 
     steps:
       - name: Configure Core RDP Settings
@@ -51,11 +51,14 @@ jobs:
         run: |
           $tsExe = "$env:ProgramFiles\Tailscale\tailscale.exe"
           
-          # Environment block se securely key read karna
-          $key = $env:TAILSCALE_KEY
+          # Pehle se chal rahi default service ko force restart karna
+          Restart-Service -Name "Tailscale" -Force
+          Start-Sleep -Seconds 5
           
-          Write-Host "Starting Tailscale connection..."
-          & $tsExe up --authkey=$key --hostname=github-free-rdp --ephemeral --accept-routes
+          Write-Host "Connecting Tailscale with fresh Auth Key..."
+          # Direct environment variable se key lekar register karna
+          & $tsExe login --authkey=$env:TAILSCALE_KEY
+          & $tsExe up --hostname=github-free-rdp --ephemeral --accept-routes
           
           $tsIP = $null
           $retries = 0
