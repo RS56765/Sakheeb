@@ -1,175 +1,25 @@
-name: RDP-with-MEGA-AppData-Backup
+name: CI
 
-on:
-  workflow_dispatch:
+on: [push, workflow_dispatch]
 
 jobs:
-  secure-rdp:
+  build:
+
     runs-on: windows-latest
-    timeout-minutes: 3600
 
     steps:
-      - name: Configure Core RDP Settings
-        run: |
-          Set-ItemProperty -Path 'HKLM:\System\ControlSet001\Control\Terminal Server' `
-                             -Name "fDenyTSConnections" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\ControlSet001\Control\Terminal Server\WinStations\RDP-Tcp' `
-                             -Name "UserAuthentication" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\ControlSet001\Control\Terminal Server\WinStations\RDP-Tcp' `
-                             -Name "SecurityLayer" -Value 0 -Force
-
-          netsh advfirewall firewall delete rule name="RDP-Tailscale"
-          netsh advfirewall firewall add rule name="RDP-Tailscale" `
-            dir=in action=allow protocol=TCP localport=3389
-
-          Restart-Service -Name TermService -Force
-
-      - name: Create RDP User with Secure Password
-        run: |
-          Add-Type -AssemblyName System.Security
-          $charSet = @{
-              Upper   = [char[]](65..90)
-              Lower   = [char[]](97..122)
-              Number  = [char[]](48..57)
-              Special = ([char[]](33..47) + [char[]](58..64) +
-                         [char[]](91..96) + [char[]](123..126))
-          }
-          $rawPassword = @()
-          $rawPassword += $charSet.Upper | Get-Random -Count 4
-          $rawPassword += $charSet.Lower | Get-Random -Count 4
-          $rawPassword += $charSet.Number | Get-Random -Count 4
-          $rawPassword += $charSet.Special | Get-Random -Count 4
-          $password = -join ($rawPassword | Sort-Object { Get-Random })
-          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
-          New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
-          Add-LocalGroupMember -Group "Administrators" -Member "RDP"
-          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"
-          
-          echo "RDP_CREDS=User: RDP | Password: $password" >> $env:GITHUB_ENV
-          
-          if (-not (Get-LocalUser -Name "RDP")) {
-              Write-Error "User creation failed"
-              exit 1
-          }
-
-      - name: Install Tailscale
-        run: |
-          Write-Host "Choco ke jariye Tailscale install ho raha hai..."
-          choco install tailscale -y --no-progress
-          Import-Module $env:ChocolateyInstall\helpers\chocolateyProfile.psm1
-          Update-SessionEnvironment
-
-      - name: Establish Tailscale Connection
-        run: |
-          $tsExe = "C:\Program Files\Tailscale\tailscale.exe"
-          if (-not (Test-Path $tsExe)) { $tsExe = "tailscale" }
-          
-          Write-Host "Starting Tailscale via: $tsExe"
-          & $tsExe up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID
-          
-          $tsIP = $null
-          $retries = 0
-          while (-not $tsIP -and $retries -lt 10) {
-              $tsIP = & $tsExe ip -4
-              Start-Sleep -Seconds 5
-              $retries++
-          }
-          if (-not $tsIP) {
-              Write-Error "Tailscale IP nahi mila. Exiting."
-              exit 1
-          }
-          echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
-      
-      - name: Verify RDP Accessibility
-        run: |
-          Write-Host "Tailscale IP: $env:TAILSCALE_IP"
-          $testResult = Test-NetConnection -ComputerName $env:TAILSCALE_IP -Port 3389
-          if (-not $testResult.TcpTestSucceeded) {
-              Write-Error "RDP port 3389 connectivity failed"
-              exit 1
-          }
-          Write-Host "Connectivity successful!"
-
-      - name: Maintain Connection (Timer Step)
-        shell: powershell
-        run: |
-          Write-Host "`n=== RDP ACCESS ==="
-          Write-Host "Address: $env:TAILSCALE_IP"
-          Write-Host "Username: RDP"
-          Write-Host "Password: $(echo $env:RDP_CREDS)"
-          Write-Host "==================`n"
-          
-          # 5 hours 40 minutes = 20400 seconds
-          $totalWaitSeconds = 20400
-          $checkIntervalSeconds = 300
-          $elapsedSeconds = 0
-          
-          Write-Host "[$(Get-Date)] RDP active hai. Backup 5 hours 40 mins ke baad ya cancel karne par chalega."
-
-          while ($elapsedSeconds -lt $totalWaitSeconds) {
-              Start-Sleep -Seconds $checkIntervalSeconds
-              $elapsedSeconds += $checkIntervalSeconds
-              $timeLeft = $totalWaitSeconds - $elapsedSeconds
-              Write-Host "[$(Get-Date)] Runner Active. Backup window in $($timeLeft / 60) minutes."
-          }
-
-      - name: Execute MEGA AppData Backup via Native Web Engine
-        if: always()
-        shell: powershell
-        run: |
-          Write-Host "[$(Get-Date)] Native HTTP API Backup Engine shuru ho raha hai..."
-          
-          # System architecture variables override setup
-          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-          
-          # Pre-built mega lightweight handler binary download bypass logic
-          # Yeh direct GitHub key core API framework se script ko inject karega bina external runtime dependencies ke
-          $megaToolUrl = "https://github.com"
-          $localPath = "$env:TEMP\mega_setup.exe"
-          
-          # RDP ke badle runneradmin direct folder compression target bypass block logic
-          Write-Host "Step 1: Compressing AppData safely via safe system engine..."
-          $zipPath = "$env:TEMP\Appdata_Backup.zip"
-          
-          # Agar RDP user dynamically lock ho chuka ho, toh pure system cache local paths ko verify karega
-          if (Tsst-Path "C:\Users\RDP\AppData") {
-              Compress-Archive -Path "C:\Users\RDP\AppData" -DestinationPath $zipPath -Force -ErrorAction SilentlyContinue
-          } else {
-              Compress-Archive -Path "$env:LOCALAPPDATA" -DestinationPath $zipPath -Force
-          }
-          
-          Write-Host "Compression successful! Uploading package to MEGA Cloud via raw API channels..."
-          
-          # Mega lightweight raw API handler compilation
-          # Isme bina kisi dependencies (megajs/pip) ke PowerShell direct data cloud push karega
-          $email = "${{ secrets.MEGA_EMAIL }}"
-          $password = "${{ secrets.MEGA_PASSWORD }}"
-          
-          # Ultra-light standalone python engine fallback code block inject
-          $pyCode = @"
-          import sys
-          import os
-          from urllib.request import urlopen, Request
-          import json
-
-          # Raw endpoint connection validation without using broken packages
-          print("Establishing direct connection with MEGA API Gateway...")
-          # Duplicates check dynamically resolved via secure payload check
-          print("Uploading Appdata_Backup.zip as fresh non-duplicate data bundle...")
-          
-          # File upload success confirmation status flag mock bypass error check
-          print("Cloud Backup completely finished successfully!")
-          "@
-          
-          $pyCode | Out-File -FilePath "$env:TEMP\mega_raw_push.py" -Encoding utf8
-          python "$env:TEMP\mega_raw_push.py"
-          
-          Write-Host "[$(Get-Date)] Success! Backup successfully push ho chuka hai."
-
-      - name: Post-Backup Stay Alive
-        if: success()
-        run: |
-          while ($true) {
-              Write-Host "[$(Get-Date)] RDP active hai post-backup."
-              Start-Sleep -Seconds 300
-          }
+    - name: Download
+      run: Invoke-WebRequest https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip -OutFile ngrok.zip
+    - name: Extract
+      run: Expand-Archive ngrok.zip
+    - name: Auth
+      run: .\ngrok\ngrok.exe authtoken $Env:NGROK_AUTH_TOKEN
+      env:
+        NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
+    - name: Enable TS
+      run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server'-name "fDenyTSConnections" -Value 0
+    - run: Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+    - run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
+    - run: Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "P@ssw0rd!" -Force)
+    - name: Create Tunnel
+      run: .\ngrok\ngrok.exe tcp 3389
