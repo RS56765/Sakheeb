@@ -49,13 +49,9 @@ jobs:
         run: |
           $tsExe = "$env:ProgramFiles\Tailscale\tailscale.exe"
           
-          # Service ko check aur restart karna
-          Restart-Service -Name "Tailscale" -Force
-          Start-Sleep -Seconds 5
-          
-          Write-Host "Connecting Tailscale directly via secure inline injection..."
-          # Is format me Windows parser variable ko block nahi kar payega
-          Invoke-Expression "& '$tsExe' up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=github-free-rdp --ephemeral --accept-routes"
+          Write-Host "Forcing Tailscale background service configuration..."
+          # Windows execution policy override ke sath explicit binary execution
+          cmd.exe /c "`"$tsExe`" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=github-free-rdp --ephemeral --accept-routes"
           
           $tsIP = $null
           $retries = 0
@@ -66,7 +62,7 @@ jobs:
           }
           
           if (-not $tsIP) {
-              Write-Error "Tailscale IP assignment failed. Secret Value is empty or invalid."
+              Write-Error "Tailscale IP assignment failed. Bypassing fallback environment."
               exit 1
           }
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
