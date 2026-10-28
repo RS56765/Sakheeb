@@ -15,8 +15,17 @@ jobs:
 
       - name: Configure and Start Automatically
         run: |
-          # macOS 15 ke sahi updated path se service ko start karein
-          sudo /Applications/Chrome\ Remote\ Desktop.app/Contents/MacOS/remoting_start_host \
+          # Pure system mein jahan bhi host file hai use dhoondh kar direct execute karein
+          HOST_PATH=$(find /Applications /Library -name "remoting_start_host" -type f -print -quit 2>/dev/null)
+          
+          if [ -z "$HOST_PATH" ]; then
+            echo "Error: remoting_start_host nahi mila!"
+            exit 1
+          fi
+          
+          echo "Found host binary at: $HOST_PATH"
+          
+          sudo "$HOST_PATH" \
             --code="${{ secrets.CHROME_AUTH_CODE }}" \
             --redirect-url="https://google.com" \
             --name="GitHub-Mac-Screen" \
