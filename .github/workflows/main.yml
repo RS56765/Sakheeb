@@ -5,35 +5,31 @@ on:
 
 jobs:
   secure-mac-vnc:
-    # Latest ki jagah macos-15-intel use kar rahe hain, iska server turant mil jata hai
     runs-on: macos-15-intel  
     timeout-minutes: 3600
 
     steps:
       - name: Create VNC User and Enable Screen Sharing
         run: |
-          # Naya admin user (RDP) banayein macOS ke liye
-          sudo dscl . -create /Users/RDP
-          sudo dscl . -create /Users/RDP UserShell /bin/bash
-          sudo dscl . -create /Users/RDP RealName "RDP User"
-          sudo dscl . -create /Users/RDP UniqueID 501
-          sudo dscl . -create /Users/RDP PrimaryGroupID 20
-          sudo dscl . -create /Users/RDP NFSHomeDirectory /Users/RDP
+          # User ka naam 'macuser' rakh diya taaki collision na ho
+          sudo dscl . -create /Users/macuser
+          sudo dscl . -create /Users/macuser UserShell /bin/bash
+          sudo dscl . -create /Users/macuser RealName "Mac Remote User"
+          sudo dscl . -create /Users/macuser UniqueID 503
+          sudo dscl . -create /Users/macuser PrimaryGroupID 20
+          sudo dscl . -create /Users/macuser NFSHomeDirectory /Users/macuser
           
-          # Random string password generator
           PASSWORD=$(openssl rand -base64 12 | tr -dc 'a-zA-Z0-9' | head -c 12)
-          sudo dscl . -passwd /Users/RDP "$PASSWORD"
-          sudo createhomedir -c -u RDP
+          sudo dscl . -passwd /Users/macuser "$PASSWORD"
+          sudo createhomedir -c -u macuser
           
-          # Admin permission add karein
-          sudo dscl . -append /Groups/admin GroupMembership RDP
+          sudo dscl . -append /Groups/admin GroupMembership macuser
           
-          # VNC/Screen Sharing service ko core level par activate karein
           sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
             -activate -configure -access -on \
             -privs -all -allowAccessFor -allUsers
           
-          echo "VNC_CREDS=User: RDP | Password: $PASSWORD" >> $GITHUB_ENV
+          echo "VNC_CREDS=User: macuser | Password: $PASSWORD" >> $GITHUB_ENV
           
       - name: Install Tailscale via Homebrew
         run: |
@@ -62,7 +58,7 @@ jobs:
         run: |
           echo -e "\n=== macOS SCREEN SHARING ACCESS ==="
           echo "VNC Address: vnc://$TAILSCALE_IP"
-          echo "Username: RDP"
+          echo "Username: macuser"
           echo "Password: $VNC_CREDS"
           echo "====================================\n"
           
