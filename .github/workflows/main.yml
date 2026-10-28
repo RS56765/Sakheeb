@@ -9,9 +9,9 @@ jobs:
     timeout-minutes: 3600
 
     steps:
-      - name: Create VNC User and Enable Screen Sharing
+      - name: Create VNC User and Force GUI Active
         run: |
-          # User ka naam 'macuser' rakh diya taaki collision na ho
+          # 1. User setup
           sudo dscl . -create /Users/macuser
           sudo dscl . -create /Users/macuser UserShell /bin/bash
           sudo dscl . -create /Users/macuser RealName "Mac Remote User"
@@ -22,13 +22,18 @@ jobs:
           PASSWORD=$(openssl rand -base64 12 | tr -dc 'a-zA-Z0-9' | head -c 12)
           sudo dscl . -passwd /Users/macuser "$PASSWORD"
           sudo createhomedir -c -u macuser
-          
           sudo dscl . -append /Groups/admin GroupMembership macuser
           
+          # 2. GUI Display Legacy Fix & VNC Service Authentication Force
+          sudo defaults write /Library/Preferences/com.apple.RemoteManagement VNCAlwaysMultiUser -bool true
+          sudo defaults write /Library/Preferences/com.apple.RemoteManagement VNCAcceptLegacyConnections -bool true
+          
+          # 3. Remote Management Restart & Open Permissions
           sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
             -activate -configure -access -on \
+            -clientopts -setvnclegacy -vnclegacy yes \
             -privs -all -allowAccessFor -allUsers
-          
+            
           echo "VNC_CREDS=User: macuser | Password: $PASSWORD" >> $GITHUB_ENV
           
       - name: Install Tailscale via Homebrew
