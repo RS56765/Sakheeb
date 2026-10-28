@@ -15,12 +15,12 @@ jobs:
 
       - name: Configure and Start Automatically
         run: |
-          # Yahan system khud Google ki command ko run karega aapke token ke saath
-          sudo /Library/PrivilegedHelperTools/chrome-remote-desktop-host.app/Contents/MacOS/remoting_start_host \
+          # macOS 15 ke sahi updated path se service ko start karein
+          sudo /Applications/Chrome\ Remote\ Desktop.app/Contents/MacOS/remoting_start_host \
             --code="${{ secrets.CHROME_AUTH_CODE }}" \
             --redirect-url="https://google.com" \
             --name="GitHub-Mac-Screen" \
-            --pin="123456" # Aapka login PIN fixed '123456' set kar diya hai
+            --pin="123456"
 
       - name: Maintain Active Session
         run: |
