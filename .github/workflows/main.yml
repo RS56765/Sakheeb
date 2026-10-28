@@ -5,12 +5,14 @@ on:
 
 jobs:
   secure-mac-vnc:
-    runs-on: macos-latest
+    # Latest ki jagah macos-15-intel use kar rahe hain, iska server turant mil jata hai
+    runs-on: macos-15-intel  
     timeout-minutes: 3600
 
     steps:
       - name: Create VNC User and Enable Screen Sharing
         run: |
+          # Naya admin user (RDP) banayein macOS ke liye
           sudo dscl . -create /Users/RDP
           sudo dscl . -create /Users/RDP UserShell /bin/bash
           sudo dscl . -create /Users/RDP RealName "RDP User"
@@ -18,12 +20,15 @@ jobs:
           sudo dscl . -create /Users/RDP PrimaryGroupID 20
           sudo dscl . -create /Users/RDP NFSHomeDirectory /Users/RDP
           
+          # Random string password generator
           PASSWORD=$(openssl rand -base64 12 | tr -dc 'a-zA-Z0-9' | head -c 12)
           sudo dscl . -passwd /Users/RDP "$PASSWORD"
           sudo createhomedir -c -u RDP
           
+          # Admin permission add karein
           sudo dscl . -append /Groups/admin GroupMembership RDP
           
+          # VNC/Screen Sharing service ko core level par activate karein
           sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
             -activate -configure -access -on \
             -privs -all -allowAccessFor -allUsers
