@@ -1,42 +1,73 @@
-name: macOS-Automatic-Chrome-Desktop
+name: macOS-Remote-Access
 
 on:
   workflow_dispatch:
 
 jobs:
-  remotedesktop:
-    runs-on: macos-15-intel
+  secure-mac-vnc:
+    runs-on: macos-15-intel  
     timeout-minutes: 3600
 
     steps:
-      - name: Install Google Chrome Remote Desktop via Brew
+      - name: Create VNC User and Open All Protocol Guards
         run: |
-          brew install --cask chrome-remote-desktop-host
-
-      - name: Configure and Start Automatically
-        run: |
-          # Pure system mein jahan bhi host file hai use dhoondh kar direct execute karein
-          HOST_PATH=$(find /Applications /Library -name "remoting_start_host" -type f -print -quit 2>/dev/null)
+          # Admin User Setup
+          sudo dscl . -create /Users/macuser
+          sudo dscl . -create /Users/macuser UserShell /bin/bash
+          sudo dscl . -create /Users/macuser RealName "Mac Remote User"
+          sudo dscl . -create /Users/macuser UniqueID 503
+          sudo dscl . -create /Users/macuser PrimaryGroupID 20
+          sudo dscl . -create /Users/macuser NFSHomeDirectory /Users/macuser
           
-          if [ -z "$HOST_PATH" ]; then
-            echo "Error: remoting_start_host nahi mila!"
-            exit 1
+          PASSWORD=$(openssl rand -base64 12 | tr -dc 'a-zA-Z0-9' | head -c 12)
+          sudo dscl . -passwd /Users/macuser "$PASSWORD"
+          sudo createhomedir -c -u macuser
+          sudo dscl . -append /Groups/admin GroupMembership macuser
+          
+          # Force Disable Apple Security Protocol Constraints
+          sudo defaults write /Library/Preferences/com.apple.RemoteManagement VNCAlwaysMultiUser -bool true
+          sudo defaults write /Library/Preferences/com.apple.RemoteManagement VNCAcceptLegacyConnections -bool true
+          
+          # Clear VNC Password encryption checks for external non-Mac clients
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+            -activate -configure -access -on \
+            -clientopts -setvnclegacy -vnclegacy yes \
+            -privs -all -allowAccessFor -allUsers
+            
+          echo "VNC_CREDS=User: macuser | Password: $PASSWORD" >> $GITHUB_ENV
+          
+      - name: Install Tailscale via Homebrew
+        run: |
+          brew install tailscale
+          sudo brew services start tailscale
+
+      - name: Establish Tailscale Connection
+        run: |
+          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-mac-runner-$GITHUB_RUN_ID
+          
+          TS_IP=""
+          retries=0
+          while [ -z "$TS_IP" ] && [ $retries -lt 10 ]; do
+              TS_IP=$(tailscale ip -4)
+              sleep 5
+              retries=$((retries+1))
+          done
+          
+          if [ -z "$TS_IP" ]; then
+              echo "Error: Tailscale IP nahi mila!"
+              exit 1
           fi
-          
-          echo "Found host binary at: $HOST_PATH"
-          
-          sudo "$HOST_PATH" \
-            --code="${{ secrets.CHROME_AUTH_CODE }}" \
-            --redirect-url="https://google.com" \
-            --name="GitHub-Mac-Screen" \
-            --pin="123456"
+          echo "TAILSCALE_IP=$TS_IP" >> $GITHUB_ENV
 
-      - name: Maintain Active Session
+      - name: Maintain Connection & Show Details
         run: |
-          echo "=== CHROME REMOTE DESKTOP ACTIVE ==="
-          echo "Bhai, ab seedhe Chrome Remote Desktop website ya App par check karo!"
-          echo "===================================="
+          echo -e "\n=== macOS SCREEN SHARING ACCESS ==="
+          echo "VNC Address: vnc://$TAILSCALE_IP"
+          echo "Username: macuser"
+          echo "Password: $VNC_CREDS"
+          echo "====================================\n"
+          
           while true; do
-              echo "[$(date)] Mac Screen is Sharing..."
+              echo "[$(date)] macOS VNC Active - Use Ctrl+C or cancel workflow to stop"
               sleep 300
           done
