@@ -1,65 +1,27 @@
-name: macOS-SSH-Terminal-Access
+name: macOS-Chrome-Remote-Desktop
 
 on:
   workflow_dispatch:
 
 jobs:
-  secure-mac-ssh:
-    runs-on: macos-15-intel  
+  remotedesktop:
+    runs-on: macos-15-intel
     timeout-minutes: 3600
 
     steps:
-      - name: Configure Secure SSH User
+      - name: Install Google Chrome Remote Desktop
         run: |
-          # 1. Ek safe admin user banayein SSH access ke liye
-          sudo dscl . -create /Users/macuser
-          sudo dscl . -create /Users/macuser UserShell /bin/bash
-          sudo dscl . -create /Users/macuser RealName "Mac SSH User"
-          sudo dscl . -create /Users/macuser UniqueID 503
-          sudo dscl . -create /Users/macuser PrimaryGroupID 20
-          sudo dscl . -create /Users/macuser NFSHomeDirectory /Users/macuser
+          # Chrome Remote Desktop ka installer download aur install karein
+          curl -L -o remotedesktop.pkg https://google.com
+          sudo installer -pkg remotedesktop.pkg -target /
           
-          # Stable Fixed Password
-          PASSWORD="MacTerminal786!#"
-          sudo dscl . -passwd /Users/macuser "$PASSWORD"
-          sudo createhomedir -c -u macuser
-          sudo dscl . -append /Groups/admin GroupMembership macuser
-          
-          # 2. Native macOS Remote Login (SSH) ko configuration bypass ke saath active karein
-          sudo systemsetup -setremotelogin on
-          
-      - name: Install Tailscale via Homebrew
+      - name: Maintain Active Session
         run: |
-          brew install tailscale
-          sudo brew services start tailscale
-
-      - name: Establish Tailscale Connection
-        run: |
-          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-mac-ssh-$GITHUB_RUN_ID
-          
-          TS_IP=""
-          retries=0
-          while [ -z "$TS_IP" ] && [ $retries -lt 10 ]; do
-              TS_IP=$(tailscale ip -4)
-              sleep 5
-              retries=$((retries+1))
-          done
-          
-          if [ -z "$TS_IP" ]; then
-              echo "Error: Tailscale IP nahi mila!"
-              exit 1
-          fi
-          echo "TAILSCALE_IP=$TS_IP" >> $GITHUB_ENV
-
-      - name: Maintain Connection & Show Details
-        run: |
-          echo -e "\n=== macOS SSH TERMINAL ACCESS ==="
-          echo "SSH Command: ssh macuser@$TAILSCALE_IP"
-          echo "Username: macuser"
-          echo "Password: MacTerminal786!#"
-          echo "==================================\n"
+          echo "=== CHROME REMOTE DESKTOP READY ==="
+          echo "Bhai, niche diye gaye Step 2 ki command Termux mein chalao!"
+          echo "==================================="
           
           while true; do
-              echo "[$(date)] macOS SSH Active - Use Ctrl+C or cancel workflow to stop"
+              echo "[$(date)] Waiting for authentication..."
               sleep 300
           done
