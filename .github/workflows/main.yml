@@ -1,43 +1,32 @@
-name: macOS-Remote-Access
+name: macOS-SSH-Terminal-Access
 
 on:
   workflow_dispatch:
 
 jobs:
-  secure-mac-vnc:
+  secure-mac-ssh:
     runs-on: macos-15-intel  
     timeout-minutes: 3600
 
     steps:
-      - name: Create VNC User and Force Screen Initialization
+      - name: Configure Secure SSH User
         run: |
-          # 1. User Account Setup
+          # 1. Ek safe admin user banayein SSH access ke liye
           sudo dscl . -create /Users/macuser
           sudo dscl . -create /Users/macuser UserShell /bin/bash
-          sudo dscl . -create /Users/macuser RealName "Mac Remote User"
+          sudo dscl . -create /Users/macuser RealName "Mac SSH User"
           sudo dscl . -create /Users/macuser UniqueID 503
           sudo dscl . -create /Users/macuser PrimaryGroupID 20
           sudo dscl . -create /Users/macuser NFSHomeDirectory /Users/macuser
           
-          PASSWORD=$(openssl rand -base64 12 | tr -dc 'a-zA-Z0-9' | head -c 12)
+          # Stable Fixed Password
+          PASSWORD="MacTerminal786!#"
           sudo dscl . -passwd /Users/macuser "$PASSWORD"
           sudo createhomedir -c -u macuser
           sudo dscl . -append /Groups/admin GroupMembership macuser
           
-          # 2. HEADLESS FIX: macOS Login window ko command line se wake-up aur refresh karein
-          sudo defaults write /Library/Preferences/com.apple.RemoteManagement VNCAlwaysMultiUser -bool true
-          sudo defaults write /Library/Preferences/com.apple.RemoteManagement VNCAcceptLegacyConnections -bool true
-          
-          # Force resolution and load graphical server window
-          sudo /bin/launchctl load -w /System/Library/LaunchDaemons/com.apple.screensharing.plist 2>/dev/null || true
-          
-          # 3. Enable Remote Access Service
-          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
-            -activate -configure -access -on \
-            -clientopts -setvnclegacy -vnclegacy yes \
-            -privs -all -allowAccessFor -allUsers
-            
-          echo "VNC_CREDS=User: macuser | Password: $PASSWORD" >> $GITHUB_ENV
+          # 2. Native macOS Remote Login (SSH) ko configuration bypass ke saath active karein
+          sudo systemsetup -setremotelogin on
           
       - name: Install Tailscale via Homebrew
         run: |
@@ -46,7 +35,7 @@ jobs:
 
       - name: Establish Tailscale Connection
         run: |
-          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-mac-runner-$GITHUB_RUN_ID
+          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-mac-ssh-$GITHUB_RUN_ID
           
           TS_IP=""
           retries=0
@@ -64,13 +53,13 @@ jobs:
 
       - name: Maintain Connection & Show Details
         run: |
-          echo -e "\n=== macOS SCREEN SHARING ACCESS ==="
-          echo "VNC Address: vnc://$TAILSCALE_IP"
+          echo -e "\n=== macOS SSH TERMINAL ACCESS ==="
+          echo "SSH Command: ssh macuser@$TAILSCALE_IP"
           echo "Username: macuser"
-          echo "Password: $VNC_CREDS"
-          echo "====================================\n"
+          echo "Password: MacTerminal786!#"
+          echo "==================================\n"
           
           while true; do
-              echo "[$(date)] macOS VNC Active - Use Ctrl+C or cancel workflow to stop"
+              echo "[$(date)] macOS SSH Active - Use Ctrl+C or cancel workflow to stop"
               sleep 300
           done
