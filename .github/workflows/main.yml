@@ -9,9 +9,9 @@ jobs:
     timeout-minutes: 3600
 
     steps:
-      - name: Create VNC User and Open All Protocol Guards
+      - name: Create VNC User and Force Screen Initialization
         run: |
-          # Admin User Setup
+          # 1. User Account Setup
           sudo dscl . -create /Users/macuser
           sudo dscl . -create /Users/macuser UserShell /bin/bash
           sudo dscl . -create /Users/macuser RealName "Mac Remote User"
@@ -24,11 +24,14 @@ jobs:
           sudo createhomedir -c -u macuser
           sudo dscl . -append /Groups/admin GroupMembership macuser
           
-          # Force Disable Apple Security Protocol Constraints
+          # 2. HEADLESS FIX: macOS Login window ko command line se wake-up aur refresh karein
           sudo defaults write /Library/Preferences/com.apple.RemoteManagement VNCAlwaysMultiUser -bool true
           sudo defaults write /Library/Preferences/com.apple.RemoteManagement VNCAcceptLegacyConnections -bool true
           
-          # Clear VNC Password encryption checks for external non-Mac clients
+          # Force resolution and load graphical server window
+          sudo /bin/launchctl load -w /System/Library/LaunchDaemons/com.apple.screensharing.plist 2>/dev/null || true
+          
+          # 3. Enable Remote Access Service
           sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
             -activate -configure -access -on \
             -clientopts -setvnclegacy -vnclegacy yes \
