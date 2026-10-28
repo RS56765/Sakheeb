@@ -11,8 +11,8 @@ jobs:
     steps:
       - name: Install Google Chrome Remote Desktop via Brew
         run: |
-          # Homebrew ka use karke official Google Chrome Remote Desktop cask install karein
-          brew install --cask chrome-remote-desktop
+          # Sahi updated cask name ke saath install karein
+          brew install --cask chrome-remote-desktop-host
           
       - name: Maintain Active Session
         run: |
