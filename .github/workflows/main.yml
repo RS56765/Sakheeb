@@ -9,16 +9,15 @@ jobs:
     timeout-minutes: 3600
 
     steps:
-      - name: Install Google Chrome Remote Desktop
+      - name: Install Google Chrome Remote Desktop via Brew
         run: |
-          # Chrome Remote Desktop ka installer download aur install karein
-          curl -L -o remotedesktop.pkg https://google.com
-          sudo installer -pkg remotedesktop.pkg -target /
+          # Homebrew ka use karke official Google Chrome Remote Desktop cask install karein
+          brew install --cask chrome-remote-desktop
           
       - name: Maintain Active Session
         run: |
           echo "=== CHROME REMOTE DESKTOP READY ==="
-          echo "Bhai, niche diye gaye Step 2 ki command Termux mein chalao!"
+          echo "Bhai, ab aap Termux mein jaakar Google ki command chala sakte ho!"
           echo "==================================="
           
           while true; do
